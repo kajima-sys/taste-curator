@@ -13,7 +13,8 @@ zero-context agent. One workspace, two Rust crates.
 - `src/` — the engine the app calls. Telemetry, artifact import, plate layout, PDF export, gates.
   Binaries: `engine` (`manifest` / `export`) and `demo` (regenerates sample images, PDF, plates).
 - `seed/` — the sample project shipped inside the Windows zip, and what the app loads when there is
-  no saved work. Paths inside it are relative to its own root (`seed/artifacts/...`).
+  no saved work. Paths inside it are relative to its own root (`seed/artifacts/...`). It includes
+  `landing.html` + `landing.css`, an HTML artifact, so the page feature is visible on first launch.
 
 There is **no JavaScript or TypeScript in this repo**, on purpose: the deliverable is a native
 Rust + Rune app. A superseded React prototype (`app/`) and its static plate preview (`web/`) were
@@ -62,7 +63,20 @@ cargo run --bin demo              # regenerate seed/
   `checksum` on `wgpu-hal` after any dependency change.
 - The app binary sets `windows_subsystem = "windows"` (no console window). Anything scripted on
   Windows must use `Start-Process -Wait` to wait for it.
-- No direct `taffy` dependency (feature conflict with `rune-taffy`); parley handles PDF text flow.
+- HTML is rendered to pixels by `src/html.rs` (Blitz + Servo's style engine + `vello_cpu`), entirely
+  offscreen: no `blitz-shell`, no `blitz-net` (that pulls OpenSSL — do not add it). Pages fetch only
+  `file:` URLs through a small `NetProvider`, so linked CSS/images beside the page resolve and
+  nothing touches the network. JavaScript never runs, by design — say so rather than "fixing" it.
+- An HTML artifact is an ordinary bitmap page (`ArtifactSource::Html { path, width, height }`), which
+  is why the canvas, telemetry and PDF export needed no HTML-specific code. Do not special-case it.
+- `taffy`'s `flexbox_balance` feature (which Blitz needs) adds `FlexWrap` variants that
+  `rune-taffy` matches exhaustively, so `vendor/rune-taffy` is patched via
+  `[patch."https://github.com/anomalyco/rune"]` to fold `Balance`/`BalanceReverse` into plain wraps.
+  The packed wrap field is 2 bits; do not try to give them new codes.
+- The dev profile drops most debug info (`debug = "line-tables-only"`, `debug = false` for deps):
+  with a CSS engine in the build, a full debug build no longer fits this VM's disk.
+- No direct `taffy` dependency of our own; parley handles PDF text flow. Blitz brings taffy in
+  transitively (see the `rune-taffy` patch above).
 - `krilla` page coordinates are top-left origin: never flip y with `PAGE_H - y`.
 - Rune layout gotchas hit while building `native/`: `el()` is a **row**, so any vertical stack
   must be `col()`. There is no `El::row()` / `.p()` builder method — use `row()` and `.padding()`.

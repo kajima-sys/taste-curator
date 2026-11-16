@@ -303,8 +303,19 @@
           "page": null
         }
       ]
+    },
+    {
+      "id": 4,
+      "name": "landing.html",
+      "source": {
+        "kind": "html",
+        "path": "seed/landing.html",
+        "width": 1280,
+        "height": 258
+      },
+      "annotations": []
     }
   ],
-  "next_artifact": 4,
+  "next_artifact": 5,
   "next_annotation": 9
 }

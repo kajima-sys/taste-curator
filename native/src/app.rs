@@ -186,6 +186,11 @@ impl App {
                 taste_curator::artifact::Substrate::Text { text, language } => {
                     self.texts.insert(id, (text, language));
                 }
+                // A page renders to pixels, and keeps its source so the curator can read it.
+                taste_curator::artifact::Substrate::Html { bitmap, text } => {
+                    self.put_page(id, page, bitmap);
+                    self.texts.insert(id, (text, "html".into()));
+                }
             },
             Err(e) => self.message = e,
         }
@@ -433,6 +438,53 @@ mod tests {
         // If the import failed, say so here instead of panicking later on a missing page.
         assert_eq!(s.project.artifacts.len(), 1, "the sample image imported: {}", s.message);
         s
+    }
+
+    fn seeded_page() -> App {
+        let mut s = App::default();
+        let dir = scratch("");
+        std::fs::write(dir.join("site.css"), "body{margin:0;font-family:Inter;background:#fff}\n.card{margin:20px;padding:20px;background:#e8e6ff}\nh1{margin:0;color:#2b1a80;font-size:30px}").unwrap();
+        let page = dir.join("page.html");
+        std::fs::write(&page, r#"<!doctype html><link rel="stylesheet" href="site.css"><div class="card"><h1>Marked up in a window</h1></div>"#).unwrap();
+        s.import(&page);
+        assert_eq!(s.project.artifacts.len(), 1, "the page imported: {}", s.message);
+        s
+    }
+
+    #[test]
+    fn a_web_page_imports_as_pixels_and_can_be_marked_up() {
+        let mut s = seeded_page();
+        let artifact = s.artifact().unwrap();
+        let ArtifactSource::Html { width, height, .. } = artifact.source else {
+            panic!("an .html file is imported as a page, not as plain text");
+        };
+        assert!(width > 300 && height > 40, "the page has a real laid-out size: {width}x{height}");
+
+        // The rendered page is a normal artifact page, so drawing on it measures its pixels.
+        s.tool = Tool::Rect;
+        s.mode = Mode::Draw { shape: Shape::Rect, start: [0.0, 0.0], current: [0.5, 0.5], points: vec![] };
+        s.commit_draft();
+        let (_, n) = s.selected_annotation().expect("the marking was created");
+        let page = s.pages.values().next().expect("the page rendered to pixels");
+        let g = taste_curator::telemetry::geometry_reading(&page.bitmap, &n.region);
+        assert_eq!((g.px_w, g.px_h), (width / 2, height / 2), "geometry comes from the rendered page");
+        assert!(s.readout.iter().any(|l| l.contains("contrast")), "{:?}", s.readout);
+    }
+
+    #[test]
+    fn a_web_page_exports_into_the_pdf_with_its_rendered_pixels() {
+        let mut s = seeded_page();
+        s.mode = Mode::Draw { shape: Shape::Rect, start: [0.05, 0.1], current: [0.6, 0.8], points: vec![] };
+        s.commit_draft();
+        let out = scratch("page.pdf");
+        s.export_to(&out);
+        assert!(s.message.contains("Exported"), "{}", s.message);
+        let bytes = std::fs::read(&out).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"), "a real PDF came out");
+        // The page is placed as an image, and the manifest says the artifact is a page.
+        assert!(String::from_utf8_lossy(&bytes).contains("taste-manifest.json"));
+        let (bitmap, _, _) = taste_curator::artifact::render_pdf_page(&bytes, 1, 1.0).expect("page 1 renders");
+        assert!(bitmap.width > 100);
     }
 
     #[test]

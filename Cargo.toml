@@ -18,6 +18,17 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 png = "0.17"
 parley = "0.12"
+# HTML is rendered to pixels in pure Rust: Blitz parses the markup, resolves the CSS through
+# Servo's style engine and paints offscreen. Only the DOM/paint crates are used, never
+# `blitz-shell` (a window) or `blitz-net` (which pulls in an HTTP stack and OpenSSL) — pages
+# read their own files from disk instead. `vello_cpu` is the software rasteriser.
+blitz-dom = { version = "0.3.0-beta.4", default-features = false }
+blitz-html = "0.3.0-beta.4"
+blitz-paint = { version = "0.3.0-beta.4", default-features = false }
+blitz-traits = "0.3.0-beta.4"
+anyrender = "0.14"
+anyrender_vello_cpu = "0.18"
+peniko = "0.6"
 
 [patch.crates-io]
 parley_engine = { path = "vendor/parley_engine" }
@@ -27,3 +38,19 @@ parley_engine = { path = "vendor/parley_engine" }
 # backend is written against).
 winit = { path = "vendor/winit" }
 wgpu-hal = { path = "vendor/wgpu-hal" }
+
+# `rune-taffy` packs taffy's styles into bitfields with exhaustive matches over `FlexWrap`.
+# Rendering HTML turns on taffy's `flexbox_balance` feature, which adds two variants, so the
+# vendored copy handles them (folding them into plain wraps: they occupy the same two bits).
+# Nothing else in it changes.
+[patch."https://github.com/anomalyco/rune"]
+rune-taffy = { path = "vendor/rune-taffy" }
+
+# HTML rendering brings a CSS engine into the build, and a default debug build of the workspace
+# plus Rune no longer fits in this VM's 16 GB disk. Debug info is what makes it huge and it is
+# not needed to develop or test: keep line numbers for backtraces, drop the rest.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

@@ -26,6 +26,7 @@ pub fn view(s: &App, _cx: &mut Cx<App>) -> El {
         let kind = match &artifact.source {
             ArtifactSource::Image { width, height, .. } => format!("{width}×{height}"),
             ArtifactSource::Text { language, .. } => language.clone(),
+            ArtifactSource::Html { .. } => "html".to_string(),
             ArtifactSource::Pdf { pages, .. } => format!("{pages} pages"),
         };
         let mut marks = row().key("marks").gap(6.0).items_center();

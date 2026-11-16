@@ -34,6 +34,8 @@ pub enum Substrate {
     /// Verbatim source bytes as UTF-8 text (lossy only for genuinely non-UTF8 bytes).
     Text { text: String, language: String },
     Pdf { pages: Vec<PdfPage> },
+    /// A web page's rendered pixels, plus its verbatim source so both can be shown.
+    Html { bitmap: Bitmap, text: String },
 }
 
 impl Substrate {
@@ -43,6 +45,7 @@ impl Substrate {
             Substrate::Image(b) => Some(b),
             Substrate::Text { .. } => None,
             Substrate::Pdf { pages } => pages.iter().find(|p| p.number == page).map(|p| &p.bitmap),
+            Substrate::Html { bitmap, .. } => Some(bitmap),
         }
     }
 
@@ -76,6 +79,11 @@ pub fn describe(path: &Path) -> Result<(String, ArtifactSource), String> {
         "png" | "jpeg" | "gif" => {
             let b = Bitmap::decode(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
             ArtifactSource::Image { path: abs, width: b.width, height: b.height }
+        }
+        _ if is_html(path) => {
+            // Render once at import so the stored size is the page's real laid-out size.
+            let bitmap = crate::html::render_file(path, 0, &crate::html::bundled_fonts())?;
+            ArtifactSource::Html { path: abs, width: bitmap.width, height: bitmap.height }
         }
         _ => ArtifactSource::Text { path: abs, language: guess_language(path) },
     };
@@ -112,7 +120,21 @@ pub fn load(source: &ArtifactSource) -> Result<Substrate, String> {
             Ok(Substrate::Text { text: String::from_utf8_lossy(&bytes).into_owned(), language: language.clone() })
         }
         ArtifactSource::Pdf { .. } => Ok(Substrate::Pdf { pages: load_pdf(&bytes)? }),
+        ArtifactSource::Html { width, .. } => {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let bitmap = crate::html::render(&path, &text, *width, &crate::html::bundled_fonts())?;
+            Ok(Substrate::Html { bitmap, text })
+        }
     }
+}
+
+/// A file the curator means as a page, by extension. HTML is picked over plain text because
+/// seeing the rendered page is the whole point of importing it.
+fn is_html(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str(),
+        "html" | "htm" | "xhtml"
+    )
 }
 
 fn pdf_page_count(bytes: &[u8]) -> Result<u32, String> {

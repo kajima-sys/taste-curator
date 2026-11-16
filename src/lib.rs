@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod camera;
+pub mod html;
 pub mod manifest;
 pub mod model;
 pub mod pdf;

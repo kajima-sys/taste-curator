@@ -44,12 +44,41 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "the app exited with $($p.ExitCode)" }
           if (-not (Test-Path dist/smoke.png)) { throw "the app did not render a frame" }
 
+      - name: Render the sample web page
+        shell: pwsh
+        run: |
+          # HTML rendering needs the bundled fonts and a real page layout, so prove both work
+          # in the built binary rather than only in the test suite.
+          Copy-Item assets dist/assets -Recurse
+          $env:HOME = "$env:RUNNER_TEMP\home2"
+          New-Item -ItemType Directory -Force $env:HOME | Out-Null
+          $p = Start-Process -FilePath target/release/taste-curator-native.exe -Wait -PassThru `
+            -ArgumentList "--script", "native/scripts/html.json", "--scene", "empty", "--at", "mark:page", "--snap", "dist/page.png"
+          if ($p.ExitCode -ne 0) { throw "the app exited with $($p.ExitCode) rendering a page" }
+          if (-not (Test-Path dist/page.png)) { throw "the web page did not render" }
+          # A blank or white-on-white render would still be a PNG file, so check it has ink.
+          Add-Type -AssemblyName System.Drawing
+          $img = [System.Drawing.Bitmap]::FromFile((Resolve-Path dist/page.png))
+          $dark = 0
+          for ($x = 0; $x -lt $img.Width; $x += 7) {
+            for ($y = 0; $y -lt $img.Height; $y += 7) {
+              $c = $img.GetPixel($x, $y)
+              if ($c.R -gt 120 -and $c.G -gt 200 -and $c.B -lt 170) { $dark++ }
+            }
+          }
+          $img.Dispose()
+          if ($dark -lt 5) { throw "the page rendered without its text or colours" }
+          Write-Host "page rendered with $dark accent-coloured samples"
+
       - name: Assemble the zip
         shell: pwsh
         run: |
           Copy-Item target/release/taste-curator-native.exe dist/TasteCurator.exe
           Copy-Item README.md dist/README.md
-          Compress-Archive -Path dist/TasteCurator.exe, dist/README.md, dist/seed -DestinationPath TasteCurator-windows.zip
+          # `assets/fonts` must travel with the exe: HTML pages render with these fonts, and the
+          # build machine's paths do not exist on the user's PC.
+          if (-not (Test-Path dist/assets/fonts/Inter-Regular.ttf)) { throw "the bundled fonts are missing" }
+          Compress-Archive -Path dist/TasteCurator.exe, dist/README.md, dist/seed, dist/assets -DestinationPath TasteCurator-windows.zip
           Get-ChildItem TasteCurator-windows.zip | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4

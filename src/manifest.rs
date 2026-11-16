@@ -148,6 +148,9 @@ pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bit
                 (format!("text ({language})"), format!("{chars} chars"), 1)
             }
             crate::model::ArtifactSource::Pdf { pages, .. } => ("pdf".to_string(), format!("{pages} pages"), *pages),
+            crate::model::ArtifactSource::Html { width, height, .. } => {
+                ("html".to_string(), format!("html page {width}×{height}px"), 1)
+            }
         };
         ManifestArtifact { id: a.id, name: a.name.clone(), kind, size, pages }
     }).collect();

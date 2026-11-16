@@ -1,7 +1,7 @@
 # Taste Curator
 
-A local-first tool for someone who is not a designer. You collect images, code and documents,
-draw a box around the details that catch your eye, and say what each one *is* — colour, spacing,
+A local-first tool for someone who is not a designer. You collect images, web pages, code and
+documents, draw a box around the details that catch your eye, and say what each one *is* — colour, spacing,
 type, shape, surface, feel — with three levels of "keep it", "never do that", "interesting
 contrast" and four perceptual dials.
 
@@ -20,7 +20,7 @@ no server. It lives in `native/`.
 **[Download the Windows build →](https://github.com/kajima-sys/taste-curator/releases/latest)**
 
 Unzip it anywhere and double-click `TasteCurator.exe`. The zip carries a sample project in
-`seed/`, so the first launch has three references and eight markings to look at.
+`seed/`, so the first launch has three images, a web page and eight markings to look at.
 
 - `V` select, `H` pan, `R` box, `O` oval, `F` freehand
 - scroll to pan, Ctrl + scroll to zoom, `Ctrl+0` to fit
@@ -30,6 +30,15 @@ Unzip it anywhere and double-click `TasteCurator.exe`. The zip carries a sample 
 Your work is saved as you go, in
 `%APPDATA%\dev.tastecurator.app\project.json`, and reopened next launch. References are read from
 where they are on your disk; nothing is copied or uploaded.
+
+### Web pages
+
+An `.html` file imports as a page, not as text: the app renders it — parsing the markup, applying
+its stylesheets, laying it out and painting it — and shows the result on the canvas, where it can
+be marked up like a screenshot. The stylesheets and images next to the page are read from your disk;
+nothing is fetched from the internet, and scripts do not run, so a page that builds itself with
+JavaScript shows only its static content. Rendering happens in pure Rust (Blitz, with Servo's style
+engine), with the same Inter font the PDFs use, so a page looks the same on every machine.
 
 ### Building it yourself
 
@@ -49,7 +58,7 @@ Two Rust crates, no other language in the build:
 | | What it is | Where |
 |---|---|---|
 | **App** | Rust + Rune. The curator you run. | `native/` |
-| **Engine** | Rust. Telemetry, artifact import, plate layout, PDF writing, round-trip checks. | `src/` |
+| **Engine** | Rust. Telemetry, HTML rendering, artifact import, plate layout, PDF writing, gates. | `src/` |
 
 The app calls the engine's own model and exporter, so a marking drawn in the app is the same
 struct the PDF plates and the embedded manifest are built from. Nothing ever rasterises your
@@ -130,6 +139,7 @@ rasterised copy. Text and PDF selections keep their verbatim string.
 src/
   model.rs       artifacts, annotations, polarities, scopes, spectra
   telemetry.rs   OKLab/OKLCH, WCAG contrast, deterministic k-means, geometry
+  html.rs        HTML + CSS to pixels in pure Rust, local files only, no JavaScript
   artifact.rs    image/PDF import via hayro
   camera.rs      pan and zoom in artifact space
   tools.rs       the tool state machine, and what a drag means

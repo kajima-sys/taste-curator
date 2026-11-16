@@ -1,0 +1,5 @@
+[
+  {"t": 0.3, "type": "tap", "key": "import"},
+  {"t": 0.7, "type": "file-dialog", "path": "seed/landing.html"},
+  {"t": 1.6, "type": "mark", "name": "page"}
+]

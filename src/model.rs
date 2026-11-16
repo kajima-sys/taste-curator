@@ -303,6 +303,10 @@ pub enum ArtifactSource {
     /// Code or plain/markdown text. `language` is a display hint only.
     Text { path: String, language: String },
     Pdf { path: String, pages: u32 },
+    /// A web page. `width`/`height` are the rendered pixel size the curator saw; the source
+    /// file itself is never modified. `language` is always `html`, so a reader can tell this
+    /// apart from a plain-text import of the same file.
+    Html { path: String, width: u32, height: u32 },
 }
 
 impl ArtifactSource {
@@ -311,6 +315,17 @@ impl ArtifactSource {
             ArtifactSource::Image { path, .. } => path,
             ArtifactSource::Text { path, .. } => path,
             ArtifactSource::Pdf { path, .. } => path,
+            ArtifactSource::Html { path, .. } => path,
+        }
+    }
+
+    /// The short kind name a manifest reader sees.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ArtifactSource::Image { .. } => "image",
+            ArtifactSource::Text { .. } => "text",
+            ArtifactSource::Pdf { .. } => "pdf",
+            ArtifactSource::Html { .. } => "html",
         }
     }
 }

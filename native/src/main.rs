@@ -302,6 +302,7 @@ fn rebase(source: &mut taste_curator::model::ArtifactSource, root: &std::path::P
         ArtifactSource::Image { path, .. } => *path = full,
         ArtifactSource::Text { path, .. } => *path = full,
         ArtifactSource::Pdf { path, .. } => *path = full,
+        ArtifactSource::Html { path, .. } => *path = full,
     }
 }
 

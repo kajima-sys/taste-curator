@@ -86,6 +86,19 @@ fn sample_project(dashboard: &Bitmap, poster: &Bitmap, swatches: &Bitmap) -> Pro
     let post = p.add_artifact("poster.png".into(), ArtifactSource::Image { path: format!("{ARTIFACTS}/poster.png"), width: poster.width, height: poster.height });
     let swat = p.add_artifact("swatches.png".into(), ArtifactSource::Image { path: format!("{ARTIFACTS}/swatches.png"), width: swatches.width, height: swatches.height });
 
+    // 4. A real web page, rendered to pixels in pure Rust. Its size is the laid-out page height,
+    //    measured the same way the app measures it when the file is opened.
+    let page = Path::new(OUT).join("landing.html");
+    if page.is_file() {
+        let size = taste_curator::html::render_file(&page, 0, &taste_curator::html::bundled_fonts())
+            .map(|b| (b.width, b.height))
+            .unwrap_or((1280, 258));
+        p.add_artifact(
+            "landing.html".into(),
+            ArtifactSource::Html { path: format!("{OUT}/landing.html"), width: size.0, height: size.1 },
+        );
+    }
+
     // 1. The accent green, liked for colour.
     let mut a = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.655, 0.60, 0.775, 0.665));
     a.scope = Scope::Color;
