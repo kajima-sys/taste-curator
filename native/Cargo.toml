@@ -5,13 +5,6 @@ edition = "2024"
 license = "MIT"
 description = "The Taste Curator's native window: a Rune app for marking up references."
 
-# A desktop app, not a console program: on Windows this sets the GUI subsystem so no black
-# terminal window opens beside it. `--snap` and `--script` still work from a shell.
-[[bin]]
-name = "taste-curator-native"
-path = "src/main.rs"
-windows_subsystem = "windows"
-
 [dependencies]
 taste-curator = { path = ".." }
 rune = { git = "https://github.com/anomalyco/rune", rev = "631e8a67cb3c40225efa3f6c4f57b80e7b18f190", features = ["tooling", "native-file-dialog"] }

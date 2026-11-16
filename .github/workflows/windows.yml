@@ -34,7 +34,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item app/public/seed dist/seed -Recurse
+          Copy-Item seed dist/seed -Recurse
           # Headless render proves the built exe starts and draws on this platform.
           $env:HOME = "$env:RUNNER_TEMP\home"
           New-Item -ItemType Directory -Force $env:HOME | Out-Null

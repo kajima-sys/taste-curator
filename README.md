@@ -42,34 +42,32 @@ cargo run --release -p taste-curator-native
 smoke-test frame, zips the exe with the sample project, uploads it as an artifact, and attaches
 the zip to the release when you push a `v*` tag.
 
-## The engine and the older web build
+## The app and its engine
+
+Two Rust crates, no other language in the build:
 
 | | What it is | Where |
 |---|---|---|
-| **Native app** | Rust + Rune. The curator you run. | `native/` |
+| **App** | Rust + Rune. The curator you run. | `native/` |
 | **Engine** | Rust. Telemetry, artifact import, plate layout, PDF writing, round-trip checks. | `src/` |
-| **Web curator** | React 19 + Vite+ + shadcn/ui. The first prototype, kept for reference. | `app/` |
 
-The native app calls the engine's own model and exporter, so a marking drawn in the app is the
-same struct the PDF plates and the embedded manifest are built from. The page never rasterises
-your annotations: geometry is a separate layer at normalized `[0..1]` coordinates, and the crops
-the exporter places are the original pixels.
+The app calls the engine's own model and exporter, so a marking drawn in the app is the same
+struct the PDF plates and the embedded manifest are built from. Nothing ever rasterises your
+annotations: geometry is a separate layer at normalized `[0..1]` coordinates, and the crops the
+exporter places are the original pixels.
 
 ## Running the engine
 
 ```sh
-# Regenerate the sample: source images, the PDF, and every plate as PNG for the web viewer.
+# Regenerate the sample images, project and PDF in seed/.
 cargo run --bin demo
 
 # Print the manifest the PDF will carry, for a project JSON.
-cargo run --bin engine -- manifest app/public/seed/project.json
+cargo run --bin engine -- manifest seed/project.json
 
 # Write the PDF.
-cargo run --bin engine -- export app/public/seed/project.json out.pdf
+cargo run --bin engine -- export seed/project.json out.pdf
 ```
-
-`demo` writes into `web/` and `app/public/seed/`, so re-running it refreshes the sample that both
-the static viewer and the web app show.
 
 ```sh
 cargo test --lib
@@ -138,9 +136,11 @@ src/
   manifest.rs    the readings and conflicts the PDF and the agent both read
   pdf/           plate layout and parley→krilla text
   bin/demo.rs    generates the sample and renders every plate
-  bin/engine.rs  manifest / export for the web app
-app/
-  src/curator/   model, colour, canvas, shelf, inspector, export, persistence
+  bin/engine.rs  manifest / export from the command line
+native/
+  src/           the Rune window: shelf, canvas, inspector, files, saved work
+  scripts/       scripted input used to drive the app headlessly
+seed/            the sample project, shipped inside the Windows zip
 ```
 
 ## Notes
@@ -148,7 +148,7 @@ app/
 - `rune` is pinned to a revision and `parley_engine` is vendored under `vendor/` (see
   `Cargo.toml`). The plain crates.io `rune` fails to build with the `line-dictionaries` feature.
 - Fonts embedded in the PDF: Inter and IBM Plex Mono, both SIL OFL, under `assets/fonts/`.
-- The web app is the curator; there is no native window. The Rust side is the engine.
-- `web/` is the first static preview of the exported plates, kept as an archive.
+- The app is `native/`; the engine in `src/` is what it calls. There is no JavaScript,
+  TypeScript or browser code anywhere in the build.
 
 MIT.

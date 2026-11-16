@@ -1,5 +1,5 @@
 {
-  "name": "Studio handoff \u2014 spring",
+  "name": "Studio handoff — spring",
   "artifacts": [
     {
       "id": 1,
@@ -11,6 +11,38 @@
         "height": 780
       },
       "annotations": [
+        {
+          "id": 1,
+          "polarity": "like",
+          "scope": "color",
+          "medium": "ui",
+          "shape": "rect",
+          "region": {
+            "x0": 0.655,
+            "y0": 0.6,
+            "x1": 0.775,
+            "y1": 0.665
+          },
+          "points": [],
+          "chips": [
+            [
+              "warm_clinical",
+              0.28
+            ],
+            [
+              "crisp_soft",
+              0.35
+            ]
+          ],
+          "notes": [
+            {
+              "text": "This green exactly — not the minty one. It holds up on white without shouting."
+            }
+          ],
+          "partner": null,
+          "spans": [],
+          "page": null
+        },
         {
           "id": 2,
           "polarity": "like",
@@ -40,31 +72,27 @@
           "page": null
         },
         {
-          "id": 1,
-          "polarity": "like",
-          "scope": "color",
+          "id": 3,
+          "polarity": "dislike",
+          "scope": "spacing_density",
           "medium": "ui",
           "shape": "rect",
           "region": {
-            "x0": 0.655,
-            "y0": 0.6,
-            "x1": 0.775,
-            "y1": 0.665
+            "x0": 0.02,
+            "y0": 0.3,
+            "x1": 0.165,
+            "y1": 0.92
           },
           "points": [],
           "chips": [
             [
-              "warm_clinical",
-              0.28
-            ],
-            [
-              "crisp_soft",
-              0.35
+              "tight_airy",
+              0.14
             ]
           ],
           "notes": [
             {
-              "text": "This green exactly \u2014 not the minty one. It holds up on white without shouting."
+              "text": "Rows stacked with no air — every label fights the next one."
             }
           ],
           "partner": null,
@@ -135,34 +163,6 @@
           "partner": null,
           "spans": [],
           "page": null
-        },
-        {
-          "id": 3,
-          "polarity": "dislike",
-          "scope": "spacing_density",
-          "medium": "ui",
-          "shape": "rect",
-          "region": {
-            "x0": 0.02,
-            "y0": 0.3,
-            "x1": 0.165,
-            "y1": 0.92
-          },
-          "points": [],
-          "chips": [
-            [
-              "tight_airy",
-              0.14
-            ]
-          ],
-          "notes": [
-            {
-              "text": "Rows stacked with no air \u2014 every label fights the next one."
-            }
-          ],
-          "partner": null,
-          "spans": [],
-          "page": null
         }
       ]
     },
@@ -205,36 +205,6 @@
           "page": null
         },
         {
-          "id": 7,
-          "polarity": "like",
-          "scope": "typography",
-          "medium": "web",
-          "shape": "text_span",
-          "region": {
-            "x0": 0.075,
-            "y0": 0.6,
-            "x1": 0.6,
-            "y1": 0.645
-          },
-          "points": [],
-          "chips": [],
-          "notes": [
-            {
-              "text": "Keep this pairing: slightly negative tracking with balanced wraps."
-            }
-          ],
-          "partner": null,
-          "spans": [
-            {
-              "text": "letter-spacing: -0.02em;\ntext-wrap: balance;",
-              "start": 0,
-              "end": 44,
-              "font": ""
-            }
-          ],
-          "page": null
-        },
-        {
           "id": 6,
           "polarity": "dislike",
           "scope": "surface_texture",
@@ -260,6 +230,36 @@
           ],
           "partner": null,
           "spans": [],
+          "page": null
+        },
+        {
+          "id": 7,
+          "polarity": "like",
+          "scope": "typography",
+          "medium": "web",
+          "shape": "text_span",
+          "region": {
+            "x0": 0.075,
+            "y0": 0.6,
+            "x1": 0.6,
+            "y1": 0.645
+          },
+          "points": [],
+          "chips": [],
+          "notes": [
+            {
+              "text": "Keep this pairing: slightly negative tracking with balanced wraps."
+            }
+          ],
+          "partner": null,
+          "spans": [
+            {
+              "text": "letter-spacing: -0.02em;\ntext-wrap: balance;",
+              "start": 0,
+              "end": 47,
+              "font": "IBM Plex Mono 13"
+            }
+          ],
           "page": null
         }
       ]
@@ -295,7 +295,7 @@
           ],
           "notes": [
             {
-              "text": "Take the restraint of the top row, not its coldness \u2014 warm the neutrals by about ten degrees."
+              "text": "Take the restraint of the top row, not its coldness — warm the neutrals by about ten degrees."
             }
           ],
           "partner": null,

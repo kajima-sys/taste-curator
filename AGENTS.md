@@ -5,15 +5,20 @@ freecode reads this file before every change. Add anything it should always reme
 ## What this is
 
 Taste Curator: a non-designer marks up references and exports a machine-actionable PDF for a
-zero-context agent. One workspace, three parts.
+zero-context agent. One workspace, two Rust crates.
 
 - `native/` — **the app**. Rust + Rune, the native desktop curator. Package
   `taste-curator-native`, binary `TasteCurator.exe` in a release. Ships to Windows through
   `.github/workflows/windows.yml` (zip with the exe + `seed/`).
 - `src/` — the engine the app calls. Telemetry, artifact import, plate layout, PDF export, gates.
   Binaries: `engine` (`manifest` / `export`) and `demo` (regenerates sample images, PDF, plates).
-- `app/` — the first web prototype (React 19, Vite+, Tailwind 4, shadcn/ui). Superseded by
-  `native/`; kept for reference and still builds. Sample data lives in `app/public/seed/`.
+- `seed/` — the sample project shipped inside the Windows zip, and what the app loads when there is
+  no saved work. Paths inside it are relative to its own root (`seed/artifacts/...`).
+
+There is **no JavaScript or TypeScript in this repo**, on purpose: the deliverable is a native
+Rust + Rune app. A superseded React prototype (`app/`) and its static plate preview (`web/`) were
+deleted; `cargo run --bin demo` regenerates the sample under `seed/`. Do not reintroduce a web UI
+or a JS toolchain.
 
 The native app is the deliverable. Rune cannot render in the preview panel, so it is verified by
 `--snap`, `--tree` and `--script`, never by the panel.
@@ -22,8 +27,8 @@ The native app is the deliverable. Rune cannot render in the preview panel, so i
 
 ```sh
 source ~/.cargo/env && export CARGO_TARGET_DIR=/tmp/tc-target && cargo test --lib
-cd app && pnpm run build          # tsc -b + vp build
-cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
+cargo test -p taste-curator-native
+cargo run --bin demo              # regenerate seed/
 ```
 
 - **Always** set `CARGO_TARGET_DIR=/tmp/tc-target`; the disk is small (16 GB) and `target/` in the
@@ -39,7 +44,6 @@ cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
 - Native tests: `cargo test -p taste-curator-native` (8 tests: draft commit, tiny-click
   rejection, freehand points, undo, metadata, pixel-aspect geometry, real PDF export + reparse,
   camera round-trip).
-- The shadcn CLI only works through `pnpm dlx shadcn@latest` (npm refuses the `devEngines` block).
 
 ## Decisions worth remembering
 
@@ -47,9 +51,18 @@ cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
   `parley_engine` is vendored under `vendor/parley_engine` via `[patch.crates-io]`; plain
   crates.io Rune fails to build with the `line-dictionaries` feature. Do not re-add
   `tiny-skia-path`.
+- Rune patches `winit` and `wgpu-hal` in its own repo, and a dependency's `[patch]` does not reach
+  a workspace that depends on it, so apps must vendor them too: `vendor/winit` (Windows taskbar and
+  first-frame placement, `warm_keyboard_layout`) and `vendor/wgpu-hal` (`set_present_rects`, DX12
+  adapter pick). Both are patched in the root `[patch.crates-io]`.
+- The whole wgpu family must stay on **30.0.1** (`wgpu`, `wgpu-core`, `wgpu-hal`, `wgpu-types`,
+  `wgpu-naga-bridge`, `wgpu-core-deps-*`). A `cargo update` that bumps `wgpu-core` to 30.0.2 pulls
+  `wgpu-hal` 30.0.2 from crates.io, silently bypasses the vendored patch, and the Windows build
+  fails with `E0599: no method named set_present_rects`. Check `Cargo.lock` has no `source`/
+  `checksum` on `wgpu-hal` after any dependency change.
+- The app binary sets `windows_subsystem = "windows"` (no console window). Anything scripted on
+  Windows must use `Start-Process -Wait` to wait for it.
 - No direct `taffy` dependency (feature conflict with `rune-taffy`); parley handles PDF text flow.
-- TypeScript 7 removed `baseUrl` — use `paths` only. `src/lib/utils.ts` re-exports `cn` from the
-  `cn` package (not clsx + tailwind-merge).
 - `krilla` page coordinates are top-left origin: never flip y with `PAGE_H - y`.
 - Rune layout gotchas hit while building `native/`: `el()` is a **row**, so any vertical stack
   must be `col()`. There is no `El::row()` / `.p()` builder method — use `row()` and `.padding()`.
@@ -63,11 +76,9 @@ cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
   1-based numbers.
 - Fonts are registered as `Taste Inter` / `Taste Mono` with `FontInfoOverride { family_name }`, so
   only the bundled Inter + IBM Plex Mono get embedded. Both are SIL OFL; licences sit beside them.
-- `app/vite.config.ts` uses `base: "./"` and `server.allowedHosts` from
-  `FREECODE_PREVIEW_HOST` for static publishing.
-
 ## Data contract
 
-`app/src/curator/model.ts` mirrors `src/model.rs` field for field; a project JSON round-trips
-between them. `app/src/curator/export.ts` rebuilds the manifest and the conflict rule in
-TypeScript for instant feedback — if you change the conflict rule, change both.
+`src/model.rs` is the only definition of a project. It is serialised as-is to `project.json` (in
+`seed/`, and in the app data dir between launches), and the same structs build the manifest and
+the PDF. There is no second implementation to keep in sync — change the model and every caller
+follows.

@@ -2,15 +2,6 @@
 /target
 **/*.rs.bk
 
-# Web app
-node_modules/
-app/dist/
-app/dist-ssr/
-*.local
-.vite/
-test-results/
-playwright-report/
-
 # Editors and OS
 .vscode/*
 !.vscode/extensions.json
@@ -20,8 +11,6 @@ playwright-report/
 
 # Local noise
 *.log
-npm-debug.log*
-pnpm-debug.log*
 .env
 .env.*
 

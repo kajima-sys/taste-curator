@@ -1,48 +1,22 @@
 {
-  "artifacts": [
-    {
-      "id": 1,
-      "kind": "image",
-      "name": "dashboard.png",
-      "pages": 1,
-      "size": "1200×780px"
-    },
-    {
-      "id": 2,
-      "kind": "image",
-      "name": "poster.png",
-      "pages": 1,
-      "size": "900×1200px"
-    },
-    {
-      "id": 3,
-      "kind": "image",
-      "name": "swatches.png",
-      "pages": 1,
-      "size": "720×460px"
-    }
-  ],
   "conflicts": [
     "Space in UI: keep the airy side (marking 2), but avoid the tight side (marking 3)."
   ],
-  "note": "Every plate is a page of the exported PDF, rendered at 1.6×. The PDF is re-opened by the app's own reader in the test suite to check that each callout still lands on its stored region and that no label covers a crop.",
-  "pages": [
-    "page-01.png",
-    "page-02.png",
-    "page-03.png",
-    "page-04.png",
-    "page-05.png",
-    "page-06.png",
-    "page-07.png",
-    "page-08.png",
-    "page-09.png",
-    "page-10.png",
-    "page-11.png",
-    "page-12.png"
+  "pdf": "seed/taste-curator.pdf",
+  "plates": [
+    "seed/plates/page-01.png",
+    "seed/plates/page-02.png",
+    "seed/plates/page-03.png",
+    "seed/plates/page-04.png",
+    "seed/plates/page-05.png",
+    "seed/plates/page-06.png",
+    "seed/plates/page-07.png",
+    "seed/plates/page-08.png",
+    "seed/plates/page-09.png",
+    "seed/plates/page-10.png",
+    "seed/plates/page-11.png",
+    "seed/plates/page-12.png"
   ],
-  "pdf_bytes": 147243,
-  "project": "Studio handoff — spring",
-  "readings": 8,
   "summary": [
     "Like: 5 markings about Space, Type, Color.",
     "Must avoid: 2 markings about Space, Surface.",

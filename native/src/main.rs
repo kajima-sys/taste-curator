@@ -1,6 +1,11 @@
 //! Taste Curator, natively: a shelf of references, a canvas you mark up, and an inspector that
 //! turns each marking into structured taste. `--snap out.png` renders it headless.
 
+// A desktop app, not a console program: on Windows this sets the GUI subsystem so no black
+// terminal window opens beside the window. `--snap` / `--script` still work when launched from a
+// shell (the console just gets no output).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod app;
 mod canvas;
 mod files;
@@ -256,11 +261,10 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Where the sample project lives: beside the executable in a release zip, or in the repo when
 /// running from a checkout.
 fn seed_dir() -> Option<std::path::PathBuf> {
-    let mut candidates = vec![std::path::PathBuf::from("app/public/seed")];
+    let mut candidates = vec![std::path::PathBuf::from("seed")];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("seed"));
-            candidates.push(dir.join("app/public/seed"));
         }
     }
     candidates.into_iter().find(|p| p.join("project.json").is_file())

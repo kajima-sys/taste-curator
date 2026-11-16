@@ -8,8 +8,8 @@ use taste_curator::model::{Annotation, ArtifactSource, Medium, Note, NormRect, P
 use taste_curator::pdf::{self, ExportInput};
 use taste_curator::telemetry::Bitmap;
 
-const OUT: &str = "web";
-const ARTIFACTS: &str = "web/artifacts";
+const OUT: &str = "seed";
+const ARTIFACTS: &str = "seed/artifacts";
 
 fn main() {
     let started = std::time::Instant::now();
@@ -34,16 +34,19 @@ fn main() {
     let m = manifest::build(&project, &lookup);
     let result = pdf::export(&ExportInput { manifest: &m, bitmaps: &lookup }).expect("export");
     std::fs::write(format!("{OUT}/taste-curator.pdf"), &result.bytes).expect("write pdf");
-    std::fs::write(format!("{OUT}/manifest.json"), serde_json::to_vec_pretty(&m).expect("json")).expect("write manifest");
+    // The project JSON ships beside the images so the app can open the sample on first launch.
+    // Paths are written relative to the seed folder's parent, which is what the app rebases from.
+    let text = serde_json::to_string_pretty(&project).expect("json");
+    std::fs::write(format!("{OUT}/project.json"), text).expect("write project");
 
     // Start from a clean page directory so a shorter export never leaves stale plates.
-    let _ = std::fs::remove_dir_all(Path::new(OUT).join("pages"));
-    // Render each plate at 2x so the preview shows crisp text.
+    let _ = std::fs::remove_dir_all(Path::new(OUT).join("plates"));
+    // Render each plate at 1.6x so the PNGs stay readable when zoomed.
     let mut pages = Vec::new();
     let mut n = 1u32;
     while let Ok((bitmap, _, _)) = taste_curator::artifact::render_pdf_page(&result.bytes, n, 1.6) {
         let name = format!("page-{n:02}.png");
-        save_png(&bitmap, &Path::new(OUT).join("pages").join(&name));
+        save_png(&bitmap, &Path::new(OUT).join("plates").join(&name));
         pages.push(name);
         n += 1;
     }
@@ -63,18 +66,15 @@ fn main() {
     }
     assert_eq!(titles.len(), pages.len(), "plate titles must match the rendered pages");
 
+    let plates: Vec<String> = pages.iter().map(|name| format!("{OUT}/plates/{name}")).collect();
     let index = serde_json::json!({
-        "pages": pages,
         "titles": titles,
-        "project": m.project,
         "summary": m.summary,
         "conflicts": m.conflicts.iter().map(|c| c.summary.clone()).collect::<Vec<_>>(),
-        "readings": m.readings.len(),
-        "artifacts": m.artifacts,
-        "pdf_bytes": result.bytes.len(),
-        "note": "Every plate is a page of the exported PDF, rendered at 1.6×. The PDF is re-opened by the app's own reader in the test suite to check that each callout still lands on its stored region and that no label covers a crop.",
+        "pdf": format!("{OUT}/taste-curator.pdf"),
+        "plates": plates,
     });
-    std::fs::write(format!("{OUT}/pages.json"), serde_json::to_vec_pretty(&index).expect("json")).expect("write pages.json");
+    std::fs::write(format!("{OUT}/plates.json"), serde_json::to_vec_pretty(&index).expect("json")).expect("write plates.json");
     println!("{} plates, {} readings, {} bytes of PDF, {:.1}s", pages.len(), m.readings.len(), result.bytes.len(), started.elapsed().as_secs_f32());
 }
 
@@ -160,6 +160,11 @@ fn sample_project(dashboard: &Bitmap, poster: &Bitmap, swatches: &Bitmap) -> Pro
     a.set_chip(Spectrum::WarmClinical, Some(0.76));
     a.notes = note("Take the restraint of the top row, not its coldness — warm the neutrals by about ten degrees.");
     p.artifact_mut(swat).unwrap().annotations.push(a);
+
+    // Annotations above are built with explicit ids rather than `add_annotation`, so the counter
+    // has to be advanced here; otherwise the app would hand a new marking an id already in use.
+    let highest = p.artifacts.iter().flat_map(|a| a.annotations.iter().map(|n| n.id)).max().unwrap_or(0);
+    p.next_annotation = highest + 1;
 
     p
 }
