@@ -38,7 +38,10 @@ jobs:
           # Headless render proves the built exe starts and draws on this platform.
           $env:HOME = "$env:RUNNER_TEMP\home"
           New-Item -ItemType Directory -Force $env:HOME | Out-Null
-          & target/release/taste-curator-native.exe --snap dist/smoke.png --scene project --size 1180x760
+          # The exe is a GUI-subsystem app, so PowerShell must be told to wait for it.
+          $p = Start-Process -FilePath target/release/taste-curator-native.exe -Wait -PassThru `
+            -ArgumentList "--snap", "dist/smoke.png", "--scene", "project", "--size", "1180x760"
+          if ($p.ExitCode -ne 0) { throw "the app exited with $($p.ExitCode)" }
           if (-not (Test-Path dist/smoke.png)) { throw "the app did not render a frame" }
 
       - name: Assemble the zip
