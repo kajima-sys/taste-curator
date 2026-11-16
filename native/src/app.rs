@@ -412,14 +412,26 @@ mod tests {
     use super::*;
     use taste_curator::model::{NormRect, Polarity, Scope};
 
+    /// A scratch file unique to this test, so parallel tests never write over each other's
+    /// image while another is reading it. Windows made that visible: `img.save` truncates the
+    /// file, and a reader in another thread sees a half-written PNG.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("taste-curator-native-tests-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
     fn seeded() -> App {
         let mut s = App::default();
-        let dir = std::env::temp_dir().join("taste-curator-native-tests");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("plate.png");
+        let path = scratch("plate.png");
         let img = image::RgbaImage::from_fn(80, 60, |x, y| image::Rgba([(x * 3) as u8, (y * 4) as u8, 120, 255]));
         img.save(&path).unwrap();
         s.import(&path);
+        // If the import failed, say so here instead of panicking later on a missing page.
+        assert_eq!(s.project.artifacts.len(), 1, "the sample image imported: {}", s.message);
         s
     }
 
@@ -520,7 +532,7 @@ mod tests {
         let mut s = seeded();
         s.mode = Mode::Draw { shape: Shape::Rect, start: [0.2, 0.2], current: [0.7, 0.7], points: vec![] };
         s.commit_draft();
-        let out = std::env::temp_dir().join("taste-curator-native-tests").join("export.pdf");
+        let out = scratch("export.pdf");
         s.export_to(&out);
         assert!(s.message.contains("Exported"), "{}", s.message);
         let bytes = std::fs::read(&out).unwrap();
