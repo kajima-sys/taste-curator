@@ -5,6 +5,9 @@ edition = "2024"
 license = "MIT"
 description = "Local-first taste elicitation and machine-actionable PDF export, built with Rune."
 
+[workspace]
+members = [".", "native"]
+
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "631e8a67cb3c40225efa3f6c4f57b80e7b18f190", features = ["tooling"] }
 krilla = "0.8"

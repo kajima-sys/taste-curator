@@ -1,0 +1,15 @@
+[package]
+name = "taste-curator-native"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "The Taste Curator's native window: a Rune app for marking up references."
+
+[dependencies]
+taste-curator = { path = ".." }
+rune = { git = "https://github.com/anomalyco/rune", rev = "631e8a67cb3c40225efa3f6c4f57b80e7b18f190", features = ["tooling", "native-file-dialog"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

@@ -1,0 +1,8 @@
+[
+  {"t": 0.2, "type": "tap", "key": "tool-box"},
+  {"t": 0.4, "type": "drag", "x": 300, "y": 250, "dx": 130, "dy": 90, "dur": 0.25},
+  {"t": 0.9, "type": "tap", "key": "note"},
+  {"t": 1.2, "type": "type", "text": "Even gaps, no fussy borders.", "every": 0.02},
+  {"t": 1.9, "type": "tap", "key": "dial-tight_airy", "x": 1030},
+  {"t": 2.2, "type": "mark", "name": "end"}
+]

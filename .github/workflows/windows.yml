@@ -1,0 +1,62 @@
+name: Windows app
+
+# Builds the native Rune app on Windows and attaches a zip to each release (and to manual
+# runs). Everything a Windows 11 machine needs is inside the zip: the exe plus the sample
+# project, so the first launch has something to show.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build the native app
+        run: cargo build --release -p taste-curator-native
+
+      - name: Run the native tests
+        run: cargo test --release -p taste-curator-native
+
+      - name: Render a smoke-test frame
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item app/public/seed dist/seed -Recurse
+          # Headless render proves the built exe starts and draws on this platform.
+          $env:HOME = "$env:RUNNER_TEMP\home"
+          New-Item -ItemType Directory -Force $env:HOME | Out-Null
+          & target/release/taste-curator-native.exe --snap dist/smoke.png --scene project --size 1180x760
+          if (-not (Test-Path dist/smoke.png)) { throw "the app did not render a frame" }
+
+      - name: Assemble the zip
+        shell: pwsh
+        run: |
+          Copy-Item target/release/taste-curator-native.exe dist/TasteCurator.exe
+          Copy-Item README.md dist/README.md
+          Compress-Archive -Path dist/TasteCurator.exe, dist/README.md, dist/seed -DestinationPath TasteCurator-windows.zip
+          Get-ChildItem TasteCurator-windows.zip | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TasteCurator-windows
+          path: TasteCurator-windows.zip
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" TasteCurator-windows.zip --clobber

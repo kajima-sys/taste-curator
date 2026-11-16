@@ -5,16 +5,18 @@ freecode reads this file before every change. Add anything it should always reme
 ## What this is
 
 Taste Curator: a non-designer marks up references and exports a machine-actionable PDF for a
-zero-context agent. Two halves, one repo.
+zero-context agent. One workspace, three parts.
 
-- `app/` — the curator. React 19, Vite+ (`vp`), Tailwind 4, shadcn/ui (radix, `vega` preset),
-  `@/` alias, icons from `lucide-react`. State is `localStorage` under
-  `taste-curator/project/v1`; the sample is `app/public/seed/`.
-- `src/` — the engine. Telemetry, artifact import, plate layout, PDF export, gates. Also two
-  binaries: `engine` (`manifest` / `export`) and `demo` (regenerates sample images, PDF, plates).
+- `native/` — **the app**. Rust + Rune, the native desktop curator. Package
+  `taste-curator-native`, binary `TasteCurator.exe` in a release. Ships to Windows through
+  `.github/workflows/windows.yml` (zip with the exe + `seed/`).
+- `src/` — the engine the app calls. Telemetry, artifact import, plate layout, PDF export, gates.
+  Binaries: `engine` (`manifest` / `export`) and `demo` (regenerates sample images, PDF, plates).
+- `app/` — the first web prototype (React 19, Vite+, Tailwind 4, shadcn/ui). Superseded by
+  `native/`; kept for reference and still builds. Sample data lives in `app/public/seed/`.
 
-There is **no native window**. Rune cannot render into the preview panel, so the UI moved to the
-web app and the Rust crate stayed as the export engine. Keep it that way unless asked.
+The native app is the deliverable. Rune cannot render in the preview panel, so it is verified by
+`--snap`, `--tree` and `--script`, never by the panel.
 
 ## Build and test
 
@@ -26,6 +28,17 @@ cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
 
 - **Always** set `CARGO_TARGET_DIR=/tmp/tc-target`; the disk is small (16 GB) and `target/` in the
   workspace fills it. `cargo` is not on PATH until `~/.cargo/env` is sourced.
+- A full debug build of Rune + the app needs ~5 GB of target dir. If a link fails with
+  `ld terminated with signal 7 [Bus error]` or `No space left on device`, delete
+  `$CARGO_TARGET_DIR/debug/build/*/out` and retry; that is a full disk, not a code error.
+  `rm -rf /tmp/tc-target` frees it all (rebuild takes ~15 min).
+- Native verification:
+  `$CARGO_TARGET_DIR/debug/taste-curator-native --snap out.png --scene project`,
+  `--tree out.json`, `--script native/scripts/draw.json --at mark:end`. Scenes: `empty`,
+  `project`, `marking`, `drawn`.
+- Native tests: `cargo test -p taste-curator-native` (8 tests: draft commit, tiny-click
+  rejection, freehand points, undo, metadata, pixel-aspect geometry, real PDF export + reparse,
+  camera round-trip).
 - The shadcn CLI only works through `pnpm dlx shadcn@latest` (npm refuses the `devEngines` block).
 
 ## Decisions worth remembering
@@ -38,6 +51,14 @@ cd app && pnpm run dev -- --port $PORT --host 0.0.0.0
 - TypeScript 7 removed `baseUrl` — use `paths` only. `src/lib/utils.ts` re-exports `cn` from the
   `cn` package (not clsx + tailwind-merge).
 - `krilla` page coordinates are top-left origin: never flip y with `PAGE_H - y`.
+- Rune layout gotchas hit while building `native/`: `el()` is a **row**, so any vertical stack
+  must be `col()`. There is no `El::row()` / `.p()` builder method — use `row()` and `.padding()`.
+  Only width-constrained text truncates, so a label in a row needs `.max_w()` or `.w_full()`.
+- The native app persists to `AppDirs::new("dev.tastecurator.app").data()/project.json` through
+  `native/src/store.rs`, writing only when the JSON changed (`last_saved`).
+- `native/scripts/*.json` are Rune script fixtures: `draw.json` (three markings), `note.json`
+  (draw + type a note + move a dial), `export.json` (draw twice, then export through the scripted
+  file dialog to `/tmp/from-app.pdf`).
 - PDF page numbering: synthesis is page 1, then overviews, then details. `render_pdf_page` takes
   1-based numbers.
 - Fonts are registered as `Taste Inter` / `Taste Mono` with `FontInfoOverride { family_name }`, so

@@ -12,35 +12,48 @@ design system that holds across UI, web, video and illustration.
 
 Everything stays on your machine. No accounts, no uploads, no inference.
 
-## Two halves, one project
+## The app, on Windows
+
+The curator is a native desktop app: Rust + [Rune](https://github.com/anomalyco/rune), no browser,
+no server. It lives in `native/`.
+
+**[Download the Windows build →](https://github.com/kajima-sys/taste-curator/releases/latest)**
+
+Unzip it anywhere and double-click `TasteCurator.exe`. The zip carries a sample project in
+`seed/`, so the first launch has three references and eight markings to look at.
+
+- `V` select, `H` pan, `R` box, `O` oval, `F` freehand
+- scroll to pan, Ctrl + scroll to zoom, `Ctrl+0` to fit
+- `Ctrl+Z` undo, `Ctrl+O` import, `Ctrl+E` export the PDF, `Delete` removes a marking
+- drag on a marking with Select to bring it up in the inspector
+
+Your work is saved as you go, in
+`%APPDATA%\dev.tastecurator.app\project.json`, and reopened next launch. References are read from
+where they are on your disk; nothing is copied or uploaded.
+
+### Building it yourself
+
+```sh
+cargo test -p taste-curator-native          # state machine, telemetry, export
+cargo run --release -p taste-curator-native
+```
+
+`.github/workflows/windows.yml` builds the exe on `windows-latest`, runs the tests, renders a
+smoke-test frame, zips the exe with the sample project, uploads it as an artifact, and attaches
+the zip to the release when you push a `v*` tag.
+
+## The engine and the older web build
 
 | | What it is | Where |
 |---|---|---|
-| **Curator** | React 19 + Vite+ + shadcn/ui. Shelf, canvas, inspector, export sheet. Persists to `localStorage`. | `app/` |
+| **Native app** | Rust + Rune. The curator you run. | `native/` |
 | **Engine** | Rust. Telemetry, artifact import, plate layout, PDF writing, round-trip checks. | `src/` |
+| **Web curator** | React 19 + Vite+ + shadcn/ui. The first prototype, kept for reference. | `app/` |
 
-The browser builds the manifest in TypeScript (`app/src/curator/export.ts`) so the export sheet
-answers instantly, using the same shapes as the Rust model. The PDF itself is produced by the
-Rust engine: the page never rasterises your annotations, and the crops it places are the original
-pixels.
-
-## Running the curator
-
-```sh
-cd app
-pnpm install
-pnpm run dev
-```
-
-Then open the printed URL. The app opens on the sample project (three generated sources, eight
-markings) so there is something to look at before you import anything.
-
-- `R` box, `O` oval, `F` freehand, `V` select, `H` pan, hold space for a temporary pan
-- scroll to pan, ctrl/⌘ + scroll to zoom, `⌘Z` / `⇧⌘Z` to undo and redo
-- `⌘E` opens the export sheet; `Delete` removes the selected marking
-- **Add** in the shelf imports a PNG, JPEG or WebP from disk
-
-Your edits are saved to `localStorage` as you go. Nothing leaves the browser.
+The native app calls the engine's own model and exporter, so a marking drawn in the app is the
+same struct the PDF plates and the embedded manifest are built from. The page never rasterises
+your annotations: geometry is a separate layer at normalized `[0..1]` coordinates, and the crops
+the exporter places are the original pixels.
 
 ## Running the engine
 
