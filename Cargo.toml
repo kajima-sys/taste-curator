@@ -21,3 +21,9 @@ parley = "0.12"
 
 [patch.crates-io]
 parley_engine = { path = "vendor/parley_engine" }
+# Rune's own `[patch]` doesn't reach a workspace that merely depends on it, so an app building
+# Rune must vendor these too: on Windows, winit's taskbar and first-frame placement fixes, and
+# wgpu-hal's DX12 adapter pick, FXC load and partial presents (both are what Rune's Windows
+# backend is written against).
+winit = { path = "vendor/winit" }
+wgpu-hal = { path = "vendor/wgpu-hal" }

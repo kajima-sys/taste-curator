@@ -200,12 +200,9 @@ fn footer(s: &App, t: tok::Theme) -> El {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    // Never steal keys from a focused field: the note has to be typeable.
-    if let Key::Text(_) = &ev.key {
-        if !ev.mods.cmd && !ev.mods.ctrl && s.note_focused() {
-            return false;
-        }
-    }
+    // A focused text field owns the keyboard: the note has to be typeable, and Backspace in it
+    // must not delete the marking.
+    let typing = tx.focused() == Some("note");
     match &ev.key {
         Key::Command('z') | Key::Command('Z') => {
             s.undo();
@@ -227,11 +224,11 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             }
             true
         }
-        Key::Delete | Key::Backspace if s.selected.is_some() && !s.note_focused() => {
+        Key::Delete | Key::Backspace if s.selected.is_some() && !typing => {
             s.delete_selected();
             true
         }
-        Key::Text(t) if !ev.mods.cmd && !ev.mods.ctrl && !s.note_focused() => {
+        Key::Text(t) if !ev.mods.cmd && !ev.mods.ctrl && !typing => {
             let tool = match t.to_ascii_lowercase().as_str() {
                 "v" => Some(Tool::Select),
                 "h" => Some(Tool::Pan),
@@ -253,15 +250,6 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         _ => false,
-    }
-}
-
-impl App {
-    fn note_focused(&self) -> bool {
-        // The note field owns the keyboard while it holds focus; the app must not eat letters.
-        // Rune routes unhandled keys here only when no control took them, so `true` would block
-        // typing. Treat a selected marking with a note field as potentially typing.
-        false
     }
 }
 
