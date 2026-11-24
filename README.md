@@ -1,14 +1,14 @@
 # Taste Curator
 
-A local-first tool for someone who is not a designer. You collect images, web pages, code and
-documents, draw a box around the details that catch your eye, and say what each one *is* — colour, spacing,
-type, shape, surface, feel — with three levels of "keep it", "never do that", "interesting
-contrast" and four perceptual dials.
+A local-first desktop app for someone who is not a designer. You collect images, web pages, code
+and documents, calibrate what actually matters by reacting to controlled visual perturbations
+(**Still has it**, **Lost it**, **Don't care**), pair anchors against foils (**This, not that**),
+and optionally mark up specific regions in your own words.
 
-The output is one PDF written for a machine, not a person: a synthesis, a vector overview plate
-per source, one detail plate per marking with an unoccluded full-resolution crop beside its exact
-telemetry, and the whole thing embedded as JSON. A zero-context agent reads it and distils a
-design system that holds across UI, web, video and illustration.
+The output is one PDF written for a cold agent, not just a person: an **Empirical Acceptance
+Envelope** (hard invariants you flinched on, verified tolerances the agent is free to adapt,
+boundary counterexamples, and contrastive pairs), vector overview plates, unoccluded detail plates,
+and the whole thing embedded as `taste-manifest.json`.
 
 Everything stays on your machine. No accounts, no uploads, no inference.
 
@@ -20,12 +20,16 @@ no server. It lives in `native/`.
 **[Download the Windows build →](https://github.com/kajima-sys/taste-curator/releases/latest)**
 
 Unzip it anywhere and double-click `TasteCurator.exe`. The zip carries a sample project in
-`seed/`, so the first launch has three images, a web page and eight markings to look at.
+`seed/`, so the first launch has three images, a web page, initial calibration judgments, a
+contrastive pair, and eight markings to explore.
 
-- `V` select, `H` pan, `R` box, `O` oval, `F` freehand
-- scroll to pan, Ctrl + scroll to zoom, `Ctrl+0` to fit
-- `Ctrl+Z` undo, `Ctrl+O` import, `Ctrl+E` export the PDF, `Delete` removes a marking
-- drag on a marking with Select to bring it up in the inspector
+- **Calibrate mode** (default): compare the original reference side-by-side against a single-axis
+  perturbation (temperature, contrast, colour strength, brightness, edge crispness, outer room)
+  - `1` Still has it, `2` Lost it, `3` Don't care
+  - click any axis pill to re-test or flip direction, or pair the active reference against a foil
+- **Mark up mode**: `V` select, `H` pan, `R` box, `O` oval, `F` freehand
+  - scroll to pan, Ctrl + scroll to zoom, `Ctrl+0` to fit
+- `Ctrl+Z` undo, `Ctrl+O` import, `Ctrl+E` export the PDF, `Delete` removes a selected marking
 
 Your work is saved as you go, in
 `%APPDATA%\dev.tastecurator.app\project.json`, and reopened next launch. References are read from
@@ -106,11 +110,9 @@ rasterised copy. Text and PDF selections keep their verbatim string.
         {
           "id": 2,
           "polarity": "like",
-          "scope": "spacing_density",
-          "medium": "ui",
+          "labels": ["spacing", "breathing"],
           "shape": "rect",
           "region": { "x0": 0.06, "y0": 0.2, "x1": 0.42, "y1": 0.55 },
-          "chips": [["tight_airy", 0.86]],
           "notes": [{ "text": "Room between the cards and around their content." }]
         }
       ]
@@ -123,8 +125,8 @@ rasterised copy. Text and PDF selections keep their verbatim string.
 
 ## What the PDF contains
 
-1. **Synthesis** — counts by polarity, the scopes they touch, unresolved conflicts stated as
-   instructions ("keep the airy side, but avoid the tight side"), and the brief.
+1. **Synthesis** — counts by polarity, the labels the curator used, the brief, and any
+   conflict stated plainly: the same word on a marking they want and one they would avoid.
 2. **Overview plates** — the whole source, with numbered vector badges and callouts placed
    outside the art they point at, so nothing is occluded.
 3. **Detail plates** — one per marking: an untouched full-resolution crop, the numbers measured
@@ -137,7 +139,7 @@ rasterised copy. Text and PDF selections keep their verbatim string.
 
 ```
 src/
-  model.rs       artifacts, annotations, polarities, scopes, spectra
+  model.rs       artifacts, annotations, polarities, the curator's labels
   telemetry.rs   OKLab/OKLCH, WCAG contrast, deterministic k-means, geometry
   html.rs        HTML + CSS to pixels in pure Rust, local files only, no JavaScript
   artifact.rs    image/PDF import via hayro

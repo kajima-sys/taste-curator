@@ -22,6 +22,7 @@ pub fn load(s: &mut App) {
     let before = project.artifacts.len();
     project.artifacts.retain(|a| std::path::Path::new(a.source.path()).exists());
     s.project = project;
+    s.target_draft = rune::TextEdit::new(&s.project.target);
     if let Some(id) = s.project.artifacts.first().map(|a| a.id) {
         s.open_artifact(id);
     }

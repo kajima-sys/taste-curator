@@ -1,6 +1,6 @@
 {
   "conflicts": [
-    "Space in UI: keep the airy side (marking 2), but avoid the tight side (marking 3)."
+    "“spacing”: marking 2 is wanted, marking 3 is not. Their notes say why."
   ],
   "pdf": "seed/taste-curator.pdf",
   "plates": [
@@ -18,28 +18,32 @@
     "seed/plates/page-12.png"
   ],
   "summary": [
-    "Like: 5 markings about Space, Type, Color.",
-    "Must avoid: 2 markings about Space, Surface.",
-    "Contrast: 1 marking about Color.",
-    "Marking 7 (Like on Type): 1.0:1 contrast, below AA — worth knowing if it is a Like.",
-    "Marking 1 (Like on Color): 1.1:1 contrast, below AA — worth knowing if it is a Like.",
-    "Marking 8 (Contrast on Color): 1.7:1 contrast, below AA — worth knowing if it is a Like.",
-    "Marking 3 (Must avoid on Space): 2.7:1 contrast, below AA — worth knowing if it is a Like.",
-    "Marking 6 (Must avoid on Surface): 1.3:1 contrast, below AA — worth knowing if it is a Like.",
-    "Conflict: Space in UI: keep the airy side (marking 2), but avoid the tight side (marking 3)."
+    "Target: Calm personal research workspace",
+    "Hard invariants (flinched when moved): Temperature (Pushed cooler); Contrast (Flattened contrast).",
+    "Verified free to adapt: Colour strength.",
+    "This, not that: dashboard.png over poster.png — Keep the calm ground of the dashboard, not the glossy contrast of the poster.",
+    "Like: 5 markings about spacing, breathing, letterforms, this green, rhythm.",
+    "Must avoid: 2 markings about spacing, surface.",
+    "Contrast: 1 marking about neutrals.",
+    "Marking 7 (Like): 1.0:1 contrast, below AA — a fact, not a verdict.",
+    "Marking 1 (Like): 1.1:1 contrast, below AA — a fact, not a verdict.",
+    "Marking 8 (Contrast): 1.7:1 contrast, below AA — a fact, not a verdict.",
+    "Marking 3 (Must avoid): 2.7:1 contrast, below AA — a fact, not a verdict.",
+    "Marking 6 (Must avoid): 1.3:1 contrast, below AA — a fact, not a verdict.",
+    "Conflict: “spacing”: marking 2 is wanted, marking 3 is not. Their notes say why."
   ],
   "titles": [
     "Synthesis — the whole read",
     "Overview — dashboard.png · 4 markings",
     "Overview — poster.png · 3 markings",
     "Overview — swatches.png · 1 marking",
-    "Detail 2 — Like · Space · UI",
-    "Detail 5 — Like · Type · Image",
-    "Detail 7 — Like · Type · Web",
-    "Detail 1 — Like · Color · UI",
-    "Detail 4 — Like · Space · Web",
-    "Detail 8 — Contrast · Color · Web",
-    "Detail 3 — Must avoid · Space · UI",
-    "Detail 6 — Must avoid · Surface · Image"
+    "Detail 2 — Like · spacing, breathing",
+    "Detail 5 — Like · letterforms",
+    "Detail 7 — Like · letterforms",
+    "Detail 1 — Like · this green",
+    "Detail 4 — Like · rhythm",
+    "Detail 8 — Contrast · neutrals",
+    "Detail 3 — Must avoid · spacing",
+    "Detail 6 — Must avoid · surface"
   ]
 }

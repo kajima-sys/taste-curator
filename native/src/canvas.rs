@@ -2,7 +2,7 @@
 //! writes into the bitmap; markings are drawn on top, in screen points, every frame.
 
 use rune::{canvas, el, Color, Drag, El, LineCap, Phase, Shape, WheelEvent};
-use taste_curator::model::{ArtifactSource, NormRect, Shape as Mark, Spectrum};
+use taste_curator::model::{ArtifactSource, NormRect, Shape as Mark};
 
 use crate::app::{App, Mode};
 
@@ -261,11 +261,6 @@ fn line_selected(s: &App, index: usize, _text: &str) -> bool {
     let line_h = 1.0 / (s.texts.get(&s.active.unwrap_or(0)).map(|(t, _)| t.lines().count().max(1) as f32).unwrap_or(24.0));
     let y0 = (index as f32) * line_h;
     y0 + line_h > r.y0 && y0 < r.y1
-}
-
-/// A human label for a spectrum dial's ends.
-pub fn dial_ends(dial: Spectrum) -> (&'static str, &'static str) {
-    dial.ends()
 }
 
 pub fn fmt_zoom(zoom: f32) -> String {

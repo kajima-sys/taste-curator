@@ -87,118 +87,11 @@ impl Polarity {
     }
 }
 
-/// What part of the artifact the note is about. Plain words, not design jargon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Scope {
-    Color,
-    SpacingDensity,
-    Typography,
-    ShapeEdge,
-    SurfaceTexture,
-    MotionMood,
-    Other,
-}
-
-impl Scope {
-    pub const ALL: [Scope; 7] = [
-        Scope::Color,
-        Scope::SpacingDensity,
-        Scope::Typography,
-        Scope::ShapeEdge,
-        Scope::SurfaceTexture,
-        Scope::MotionMood,
-        Scope::Other,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Scope::Color => "Color",
-            Scope::SpacingDensity => "Space",
-            Scope::Typography => "Type",
-            Scope::ShapeEdge => "Shape",
-            Scope::SurfaceTexture => "Surface",
-            Scope::MotionMood => "Feel",
-            Scope::Other => "Other",
-        }
-    }
-
-    pub fn slug(self) -> &'static str {
-        match self {
-            Scope::Color => "color",
-            Scope::SpacingDensity => "spacing_density",
-            Scope::Typography => "typography",
-            Scope::ShapeEdge => "shape_edge",
-            Scope::SurfaceTexture => "surface_texture",
-            Scope::MotionMood => "motion_mood",
-            Scope::Other => "other",
-        }
-    }
-}
-
-/// Where the trait should show up next; keeps contradictions scoped across media.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Medium {
-    Ui,
-    Web,
-    Video,
-    Illustration,
-}
-
-impl Medium {
-    pub const ALL: [Medium; 4] = [Medium::Ui, Medium::Web, Medium::Video, Medium::Illustration];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Medium::Ui => "UI",
-            Medium::Web => "Web",
-            Medium::Video => "Video",
-            Medium::Illustration => "Image",
-        }
-    }
-
-    pub fn slug(self) -> &'static str {
-        match self {
-            Medium::Ui => "ui",
-            Medium::Web => "web",
-            Medium::Video => "video",
-            Medium::Illustration => "illustration",
-        }
-    }
-}
-
-/// The four perceptual dials. Each is `0..1` where `0` is the left word and `1` the right.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Spectrum {
-    TightAiry,
-    CrispSoft,
-    FlatLayered,
-    WarmClinical,
-}
-
-impl Spectrum {
-    pub const ALL: [Spectrum; 4] = [Spectrum::TightAiry, Spectrum::CrispSoft, Spectrum::FlatLayered, Spectrum::WarmClinical];
-
-    pub fn ends(self) -> (&'static str, &'static str) {
-        match self {
-            Spectrum::TightAiry => ("tight", "airy"),
-            Spectrum::CrispSoft => ("crisp", "soft"),
-            Spectrum::FlatLayered => ("flat", "layered"),
-            Spectrum::WarmClinical => ("warm", "clinical"),
-        }
-    }
-
-    pub fn slug(self) -> &'static str {
-        match self {
-            Spectrum::TightAiry => "tight_airy",
-            Spectrum::CrispSoft => "crisp_soft",
-            Spectrum::FlatLayered => "flat_layered",
-            Spectrum::WarmClinical => "warm_clinical",
-        }
-    }
-}
+/// A short label the curator typed themselves, such as `breathing` or `this green`.
+///
+/// There is deliberately no fixed vocabulary: the app offers back only labels that were
+/// actually typed, so the same word means the same thing months later, whatever the medium.
+pub type Label = String;
 
 /// A free-form note, plus an optional machine tag for the downstream agent.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -232,21 +125,20 @@ pub enum Shape {
     PdfObject,
 }
 
-/// One curated observation.
+/// One curated observation: what the curator circled, how they feel about it, the words they
+/// typed, and where it sits. Nothing about it is graded by the app.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Annotation {
     pub id: u32,
     pub polarity: Polarity,
-    pub scope: Scope,
-    pub medium: Medium,
+    #[serde(default)]
+    pub labels: Vec<Label>,
     pub shape: Shape,
     /// The selection in normalized artifact space. This is the only geometry the PDF overlay
     /// and the telemetry sampler trust.
     pub region: NormRect,
     /// Freehand points in normalized artifact space, or the corners of another shape.
     pub points: Vec<[f32; 2]>,
-    /// The spectrum dials the curator moved, and where they put them.
-    pub chips: Vec<(Spectrum, f32)>,
     pub notes: Vec<Note>,
     /// Contrast partner: the annotation this one is contrasted *with*.
     pub partner: Option<u32>,
@@ -261,12 +153,10 @@ impl Annotation {
         Annotation {
             id,
             polarity,
-            scope: Scope::Other,
-            medium: Medium::Ui,
+            labels: Vec::new(),
             shape,
             region,
             points: Vec::new(),
-            chips: Vec::new(),
             notes: Vec::new(),
             partner: None,
             spans: Vec::new(),
@@ -274,15 +164,47 @@ impl Annotation {
         }
     }
 
-    pub fn chip(&self, s: Spectrum) -> Option<f32> {
-        self.chips.iter().find(|(which, _)| *which == s).map(|(_, v)| *v)
+    /// Does this marking carry `label`? Compared case-insensitively, so typing the same word
+    /// twice never creates a near-duplicate.
+    pub fn has_label(&self, label: &str) -> bool {
+        self.labels.iter().any(|l| l.eq_ignore_ascii_case(label.trim()))
     }
 
-    /// Set or clear one dial.
-    pub fn set_chip(&mut self, s: Spectrum, value: Option<f32>) {
-        self.chips.retain(|(which, _)| *which != s);
-        if let Some(v) = value {
-            self.chips.push((s, v.clamp(0.0, 1.0)));
+    /// Every label used anywhere in the project, most-used first, for offering back as chips.
+    pub fn vocabulary(artifacts: &[Artifact]) -> Vec<(String, usize)> {
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        for a in artifacts.iter().flat_map(|a| &a.annotations) {
+            for label in &a.labels {
+                match seen.iter_mut().find(|(w, _)| w.eq_ignore_ascii_case(label)) {
+                    Some((_, count)) => *count += 1,
+                    None => seen.push((label.clone(), 1)),
+                }
+            }
+        }
+        seen.sort_by(|(a, ca), (b, cb)| cb.cmp(ca).then(a.to_lowercase().cmp(&b.to_lowercase())));
+        seen
+    }
+
+    /// Add a label unless it is blank or already there. Returns whether it was added.
+    pub fn add_label(&mut self, label: &str) -> bool {
+        let label = label.trim();
+        if label.is_empty() || self.has_label(label) {
+            return false;
+        }
+        self.labels.push(label.to_string());
+        true
+    }
+
+    pub fn remove_label(&mut self, label: &str) {
+        self.labels.retain(|l| !l.eq_ignore_ascii_case(label.trim()));
+    }
+
+    /// Flip a label on or off, which is what one press of a chip does in the inspector.
+    pub fn toggle_label(&mut self, label: &str) {
+        if self.has_label(label) {
+            self.remove_label(label);
+        } else {
+            self.add_label(label);
         }
     }
 
@@ -350,18 +272,173 @@ impl Artifact {
     }
 }
 
-/// The whole project: a list of artifacts and the next ids to hand out.
+/// One visual dimension that can be perturbed on any reference (image, page, print, art) to
+/// test whether the curator flinches when it moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeAxis {
+    Warmth,
+    Contrast,
+    Chroma,
+    Lightness,
+    Crispness,
+    Breathing,
+}
+
+impl ProbeAxis {
+    pub const ALL: [ProbeAxis; 6] = [
+        ProbeAxis::Warmth,
+        ProbeAxis::Contrast,
+        ProbeAxis::Chroma,
+        ProbeAxis::Lightness,
+        ProbeAxis::Crispness,
+        ProbeAxis::Breathing,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ProbeAxis::Warmth => "Temperature",
+            ProbeAxis::Contrast => "Contrast",
+            ProbeAxis::Chroma => "Colour strength",
+            ProbeAxis::Lightness => "Brightness",
+            ProbeAxis::Crispness => "Edge crispness",
+            ProbeAxis::Breathing => "Outer room",
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            ProbeAxis::Warmth => "warmth",
+            ProbeAxis::Contrast => "contrast",
+            ProbeAxis::Chroma => "chroma",
+            ProbeAxis::Lightness => "lightness",
+            ProbeAxis::Crispness => "crispness",
+            ProbeAxis::Breathing => "breathing",
+        }
+    }
+
+    /// Plain-language description of what a perturbation along `dir` did to the reference.
+    pub fn change_label(self, dir: ProbeDirection) -> &'static str {
+        match (self, dir) {
+            (ProbeAxis::Warmth, ProbeDirection::Negative) => "Pushed cooler",
+            (ProbeAxis::Warmth, ProbeDirection::Positive) => "Pushed warmer",
+            (ProbeAxis::Contrast, ProbeDirection::Negative) => "Flattened contrast",
+            (ProbeAxis::Contrast, ProbeDirection::Positive) => "Pushed harsher contrast",
+            (ProbeAxis::Chroma, ProbeDirection::Negative) => "Muted colours",
+            (ProbeAxis::Chroma, ProbeDirection::Positive) => "Stronger colours",
+            (ProbeAxis::Lightness, ProbeDirection::Negative) => "Darkened overall",
+            (ProbeAxis::Lightness, ProbeDirection::Positive) => "Brightened overall",
+            (ProbeAxis::Crispness, ProbeDirection::Negative) => "Softened edges",
+            (ProbeAxis::Crispness, ProbeDirection::Positive) => "Sharpened edges",
+            (ProbeAxis::Breathing, ProbeDirection::Negative) => "Cropped tighter",
+            (ProbeAxis::Breathing, ProbeDirection::Positive) => "More room around it",
+        }
+    }
+}
+
+/// Which way a counterfactual probe moved along its axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeDirection {
+    Negative,
+    Positive,
+}
+
+impl ProbeDirection {
+    pub fn sign(self) -> f32 {
+        match self {
+            ProbeDirection::Negative => -1.0,
+            ProbeDirection::Positive => 1.0,
+        }
+    }
+
+    pub fn opposite(self) -> ProbeDirection {
+        match self {
+            ProbeDirection::Negative => ProbeDirection::Positive,
+            ProbeDirection::Positive => ProbeDirection::Negative,
+        }
+    }
+}
+
+/// The curator's reaction to a controlled single-axis perturbation of a reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlinchVerdict {
+    /// The perturbation did not break what they like.
+    StillHasIt,
+    /// They flinched — this change broke what they like.
+    LostIt,
+    /// This dimension is not what matters to them; skip further probes on it.
+    DontCare,
+}
+
+impl FlinchVerdict {
+    pub fn label(self) -> &'static str {
+        match self {
+            FlinchVerdict::StillHasIt => "Still has it",
+            FlinchVerdict::LostIt => "Lost it",
+            FlinchVerdict::DontCare => "Don't care",
+        }
+    }
+}
+
+/// One recorded flinch judgment from counterfactual calibration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProbeJudgment {
+    pub artifact: u32,
+    pub axis: ProbeAxis,
+    pub direction: ProbeDirection,
+    /// Perturbation magnitude in `(0.0..=1.0]`.
+    pub strength: f32,
+    pub verdict: FlinchVerdict,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// A contrastive pair ("This, not that"): an anchor reference paired directly against a foil
+/// reference so the difference between them defines the boundary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContrastivePair {
+    pub id: u32,
+    pub anchor: u32,
+    pub foil: u32,
+    #[serde(default)]
+    pub note: String,
+}
+
+fn default_next_pair() -> u32 { 1 }
+
+/// The whole project: a list of artifacts, calibration judgments, contrastive pairs, and the
+/// next ids to hand out.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
+    /// What the curator is building (e.g. "personal reading list page", "book cover").
+    #[serde(default)]
+    pub target: String,
     pub artifacts: Vec<Artifact>,
+    #[serde(default)]
+    pub probes: Vec<ProbeJudgment>,
+    #[serde(default)]
+    pub pairs: Vec<ContrastivePair>,
     pub next_artifact: u32,
     pub next_annotation: u32,
+    #[serde(default = "default_next_pair")]
+    pub next_pair: u32,
 }
 
 impl Default for Project {
     fn default() -> Self {
-        Project { name: "Untitled taste".into(), artifacts: Vec::new(), next_artifact: 1, next_annotation: 1 }
+        Project {
+            name: "Untitled taste".into(),
+            target: String::new(),
+            artifacts: Vec::new(),
+            probes: Vec::new(),
+            pairs: Vec::new(),
+            next_artifact: 1,
+            next_annotation: 1,
+            next_pair: 1,
+        }
     }
 }
 
@@ -375,6 +452,40 @@ impl Project {
 
     pub fn artifact(&self, id: u32) -> Option<&Artifact> { self.artifacts.iter().find(|a| a.id == id) }
     pub fn artifact_mut(&mut self, id: u32) -> Option<&mut Artifact> { self.artifacts.iter_mut().find(|a| a.id == id) }
+
+    /// Record or replace a calibration verdict for `(artifact, axis, direction)`.
+    pub fn record_probe(&mut self, judgment: ProbeJudgment) {
+        self.probes.retain(|p| {
+            !(p.artifact == judgment.artifact && p.axis == judgment.axis && p.direction == judgment.direction)
+        });
+        self.probes.push(judgment);
+    }
+
+    /// Clear all calibration judgments for one artifact so the curator can re-calibrate it.
+    pub fn clear_probes_for(&mut self, artifact: u32) {
+        self.probes.retain(|p| p.artifact != artifact);
+    }
+
+    /// Pair an anchor artifact against a foil artifact ("This, not that").
+    pub fn add_pair(&mut self, anchor: u32, foil: u32, note: String) -> Option<u32> {
+        if anchor == foil {
+            return None;
+        }
+        if let Some(existing) = self.pairs.iter_mut().find(|p| p.anchor == anchor && p.foil == foil) {
+            if !note.trim().is_empty() {
+                existing.note = note;
+            }
+            return Some(existing.id);
+        }
+        let id = self.next_pair;
+        self.next_pair += 1;
+        self.pairs.push(ContrastivePair { id, anchor, foil, note });
+        Some(id)
+    }
+
+    pub fn remove_pair(&mut self, id: u32) {
+        self.pairs.retain(|p| p.id != id);
+    }
 
     pub fn add_annotation(&mut self, artifact: u32, polarity: Polarity, shape: Shape, region: NormRect) -> u32 {
         let id = self.next_annotation;
@@ -455,11 +566,27 @@ mod tests {
         let avoid = p.add_annotation(a, Polarity::Dislike, Shape::Ellipse, NormRect::new(0.1, 0.1, 0.2, 0.2));
         assert_eq!(p.ordered().iter().map(|(_, n)| n.id).collect::<Vec<_>>(), vec![like, avoid]);
         let n = p.annotation_mut(a, like).unwrap();
-        n.set_chip(Spectrum::TightAiry, Some(1.7));
-        assert_eq!(n.chip(Spectrum::TightAiry), Some(1.0));
-        n.set_chip(Spectrum::TightAiry, None);
-        assert_eq!(n.chip(Spectrum::TightAiry), None);
+        assert!(n.add_label("breathing"));
+        assert!(!n.add_label("  breathing "), "the same label is never stored twice");
+        n.toggle_label("this green");
+        assert_eq!(n.labels, vec!["breathing".to_string(), "this green".to_string()]);
+        n.toggle_label("breathing");
+        assert_eq!(n.labels, vec!["this green".to_string()]);
         assert_eq!(p.counts(), (1, 1, 0));
+    }
+
+    #[test]
+    fn vocabulary_is_learned_only_from_labels_actually_typed() {
+        let mut p = Project::default();
+        let a = p.add_artifact("a.png".into(), ArtifactSource::Image { path: "a.png".into(), width: 4, height: 4 });
+        let one = p.add_annotation(a, Polarity::Like, Shape::Rect, NormRect::new(0.0, 0.0, 0.2, 0.2));
+        let two = p.add_annotation(a, Polarity::Like, Shape::Rect, NormRect::new(0.3, 0.3, 0.5, 0.5));
+        p.annotation_mut(a, one).unwrap().add_label("breathing");
+        p.annotation_mut(a, two).unwrap().add_label("Breathing");
+        p.annotation_mut(a, two).unwrap().add_label("margins");
+        let vocab = Annotation::vocabulary(&p.artifacts);
+        assert_eq!(vocab[0].1, 2, "the label used twice comes first: {vocab:?}");
+        assert_eq!(vocab.len(), 2, "case-insensitive duplicates collapse: {vocab:?}");
     }
 
     #[test]

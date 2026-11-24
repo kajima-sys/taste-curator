@@ -3,8 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
+use taste_curator::calibrate::DEFAULT_STRENGTH;
 use taste_curator::manifest;
-use taste_curator::model::{Annotation, ArtifactSource, Medium, Note, NormRect, Polarity, Project, Scope, Shape, Span, Spectrum};
+use taste_curator::model::{
+    Annotation, ArtifactSource, FlinchVerdict, Note, NormRect, Polarity, ProbeAxis,
+    ProbeDirection, ProbeJudgment, Project, Shape, Span,
+};
 use taste_curator::pdf::{self, ExportInput};
 use taste_curator::telemetry::Bitmap;
 
@@ -62,7 +66,7 @@ fn main() {
         titles.push(format!("Overview — {} · {} marking{}", r.artifact_name, count, if count == 1 { "" } else { "s" }));
     }
     for r in &m.readings {
-        titles.push(format!("Detail {} — {} · {} · {}", r.annotation, r.polarity.label(), r.scope.label(), r.medium.label()));
+        titles.push(format!("Detail {} — {}", r.annotation, manifest::headline(r)));
     }
     assert_eq!(titles.len(), pages.len(), "plate titles must match the rendered pages");
 
@@ -81,7 +85,11 @@ fn main() {
 fn note(text: &str) -> Vec<Note> { vec![Note { text: text.into() }] }
 
 fn sample_project(dashboard: &Bitmap, poster: &Bitmap, swatches: &Bitmap) -> Project {
-    let mut p = Project { name: "Studio handoff — spring".into(), ..Project::default() };
+    let mut p = Project {
+        name: "Studio handoff — spring".into(),
+        target: "Calm personal research workspace".into(),
+        ..Project::default()
+    };
     let dash = p.add_artifact("dashboard.png".into(), ArtifactSource::Image { path: format!("{ARTIFACTS}/dashboard.png"), width: dashboard.width, height: dashboard.height });
     let post = p.add_artifact("poster.png".into(), ArtifactSource::Image { path: format!("{ARTIFACTS}/poster.png"), width: poster.width, height: poster.height });
     let swat = p.add_artifact("swatches.png".into(), ArtifactSource::Image { path: format!("{ARTIFACTS}/swatches.png"), width: swatches.width, height: swatches.height });
@@ -99,64 +107,51 @@ fn sample_project(dashboard: &Bitmap, poster: &Bitmap, swatches: &Bitmap) -> Pro
         );
     }
 
-    // 1. The accent green, liked for colour.
+    // 1. The accent green, liked. `labels` are the curator's own words, never a fixed list.
     let mut a = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.655, 0.60, 0.775, 0.665));
-    a.scope = Scope::Color;
-    a.medium = Medium::Ui;
-    a.set_chip(Spectrum::WarmClinical, Some(0.28));
-    a.set_chip(Spectrum::CrispSoft, Some(0.35));
+    a.add_label("this green");
     a.notes = note("This green exactly — not the minty one. It holds up on white without shouting.");
     p.artifact_mut(dash).unwrap().annotations.push(a);
 
-    // 2. Airy card spacing, liked. Same scope and medium as the dislike below, opposite half of
-    //    the tight-airy dial: an honest conflict the summary has to name.
+    // 2. Airy spacing, liked. Shares the label "spacing" with the dislike below, so the export
+    //    has an honest contradiction to name — in the curator's words, not the app's.
     let mut a = Annotation::new(2, Polarity::Like, Shape::Rect, NormRect::new(0.255, 0.175, 0.60, 0.53));
-    a.scope = Scope::SpacingDensity;
-    a.medium = Medium::Ui;
-    a.set_chip(Spectrum::TightAiry, Some(0.86));
-    a.notes = note("Room between the cards and around their content. I want this everywhere in the app shell.");
+    a.add_label("spacing");
+    a.add_label("breathing");
+    a.notes = note("Room between the cards and around their content. I want this everywhere.");
     p.artifact_mut(dash).unwrap().annotations.push(a);
 
     // 3. The cramped sidebar table, disliked.
     let mut a = Annotation::new(3, Polarity::Dislike, Shape::Rect, NormRect::new(0.02, 0.30, 0.165, 0.92));
-    a.scope = Scope::SpacingDensity;
-    a.medium = Medium::Ui;
-    a.set_chip(Spectrum::TightAiry, Some(0.14));
+    a.add_label("spacing");
     a.notes = note("Rows stacked with no air — every label fights the next one.");
     p.artifact_mut(dash).unwrap().annotations.push(a);
 
     // 4. Dense data table, liked (freehand outline).
     let mut a = Annotation::new(4, Polarity::Like, Shape::Freehand, NormRect::new(0.265, 0.66, 0.615, 0.86));
-    a.medium = Medium::Web;
-    a.scope = Scope::SpacingDensity;
+    a.add_label("rhythm");
     a.points = vec![
         [0.268, 0.668], [0.40, 0.662], [0.545, 0.671], [0.610, 0.700],
         [0.607, 0.812], [0.470, 0.852], [0.320, 0.845], [0.270, 0.805], [0.268, 0.668],
     ];
-    a.set_chip(Spectrum::TightAiry, Some(0.22));
-    a.notes = note("But a dense table is fine when the rhythm is regular. Tight is not the problem; ragged is.");
+    a.notes = note("A dense table is fine when the rhythm is regular. Tight is not the problem; ragged is.");
     p.artifact_mut(dash).unwrap().annotations.push(a);
 
     // 5. Poster headline type, liked.
     let mut a = Annotation::new(5, Polarity::Like, Shape::Rect, NormRect::new(0.075, 0.185, 0.615, 0.325));
-    a.scope = Scope::Typography;
-    a.medium = Medium::Illustration;
-    a.set_chip(Spectrum::CrispSoft, Some(0.18));
+    a.add_label("letterforms");
     a.notes = note("Heavy, tight tracking, no softness in the letterforms. This is the tone for editorial pieces.");
     p.artifact_mut(post).unwrap().annotations.push(a);
 
     // 6. Glossy gradient, disliked.
     let mut a = Annotation::new(6, Polarity::Dislike, Shape::Ellipse, NormRect::new(0.60, 0.42, 0.93, 0.66));
-    a.scope = Scope::SurfaceTexture;
-    a.medium = Medium::Illustration;
-    a.set_chip(Spectrum::FlatLayered, Some(0.82));
+    a.add_label("surface");
     a.notes = note("Plasticky sheen over a flat field. Reads as a template.");
     p.artifact_mut(post).unwrap().annotations.push(a);
 
     // 7. Verbatim code selection from a text artifact's span, carried as text.
     let mut a = Annotation::new(7, Polarity::Like, Shape::TextSpan, NormRect::new(0.075, 0.60, 0.60, 0.645));
-    a.scope = Scope::Typography;
-    a.medium = Medium::Web;
+    a.add_label("letterforms");
     a.spans = vec![Span {
         text: "letter-spacing: -0.02em;\ntext-wrap: balance;".into(),
         start: 0,
@@ -168,11 +163,49 @@ fn sample_project(dashboard: &Bitmap, poster: &Bitmap, swatches: &Bitmap) -> Pro
 
     // 8. Contrast marking: the clinical swatch against the warm one.
     let mut a = Annotation::new(8, Polarity::Contrast, Shape::Rect, NormRect::new(0.09, 0.10, 0.53, 0.46));
-    a.scope = Scope::Color;
-    a.medium = Medium::Web;
-    a.set_chip(Spectrum::WarmClinical, Some(0.76));
+    a.add_label("neutrals");
     a.notes = note("Take the restraint of the top row, not its coldness — warm the neutrals by about ten degrees.");
     p.artifact_mut(swat).unwrap().annotations.push(a);
+
+    // Sample counterfactual calibration judgments + one contrastive pair so the shipped seed
+    // immediately demonstrates an Empirical Acceptance Envelope while leaving 3 axes open to test.
+    p.record_probe(ProbeJudgment {
+        artifact: dash,
+        axis: ProbeAxis::Warmth,
+        direction: ProbeDirection::Negative,
+        strength: DEFAULT_STRENGTH,
+        verdict: FlinchVerdict::LostIt,
+        note: "feels too clinical when pushed cold".into(),
+    });
+    p.record_probe(ProbeJudgment {
+        artifact: dash,
+        axis: ProbeAxis::Warmth,
+        direction: ProbeDirection::Positive,
+        strength: DEFAULT_STRENGTH,
+        verdict: FlinchVerdict::StillHasIt,
+        note: String::new(),
+    });
+    p.record_probe(ProbeJudgment {
+        artifact: dash,
+        axis: ProbeAxis::Contrast,
+        direction: ProbeDirection::Negative,
+        strength: DEFAULT_STRENGTH,
+        verdict: FlinchVerdict::LostIt,
+        note: "loses legibility when flattened".into(),
+    });
+    p.record_probe(ProbeJudgment {
+        artifact: dash,
+        axis: ProbeAxis::Chroma,
+        direction: ProbeDirection::Negative,
+        strength: DEFAULT_STRENGTH,
+        verdict: FlinchVerdict::DontCare,
+        note: String::new(),
+    });
+    p.add_pair(
+        dash,
+        post,
+        "Keep the calm ground of the dashboard, not the glossy contrast of the poster".into(),
+    );
 
     // Annotations above are built with explicit ids rather than `add_annotation`, so the counter
     // has to be advanced here; otherwise the app would hand a new marking an id already in use.

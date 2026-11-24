@@ -84,12 +84,42 @@ cargo run --bin demo              # regenerate seed/
 - The native app persists to `AppDirs::new("dev.tastecurator.app").data()/project.json` through
   `native/src/store.rs`, writing only when the JSON changed (`last_saved`).
 - `native/scripts/*.json` are Rune script fixtures: `draw.json` (three markings), `note.json`
-  (draw + type a note + move a dial), `export.json` (draw twice, then export through the scripted
+  (draw + type a note + add a label), `export.json` (draw twice, then export through the scripted
   file dialog to `/tmp/from-app.pdf`).
 - PDF page numbering: synthesis is page 1, then overviews, then details. `render_pdf_page` takes
   1-based numbers.
 - Fonts are registered as `Taste Inter` / `Taste Mono` with `FontInfoOverride { family_name }`, so
   only the bundled Inter + IBM Plex Mono get embedded. Both are SIL OFL; licences sit beside them.
+## The label model (no taxonomies)
+
+The curator's words are the only structure. Do not reintroduce `Scope`, `Medium`, adjective
+`Spectrum` dials, or any fixed chip list: the user explicitly rejected all four as forced,
+inconsistent vocabulary that only worked for web UI.
+
+- `Annotation` has `labels: Vec<Label>` (a `Label` is just `String`) and the free-form `Note`.
+  Labels are the curator's own short words, deduped case-insensitively; `add_label` /
+  `remove_label` / `toggle_label` / `has_label` live on `Annotation`.
+- `Annotation::vocabulary(&[Artifact])` is the **only** source of suggested words in the
+  inspector: labels actually typed somewhere in the project, most-used first. Never ship a
+  built-in word list.
+- A `Conflict` is a shared label on a `Like` and a `Dislike` (`manifest::find_conflicts`).
+  Different labels never conflict; nothing is inferred.
+- Measurements are facts, not grades: the inspector shows plain words ("Size: about 20% of the
+  frame") and keeps the numbers behind the `exact values` toggle (`App::exact`, `show_values`).
+- The model must stay medium-agnostic (design, digital art, photography, print, code).
+
+## Active Counterfactual Calibration & UI design system
+
+- `src/calibrate.rs` implements six pure-Rust single-axis perturbations (`Warmth`, `Contrast`,
+  `Chroma`, `Lightness`, `Crispness`, `Breathing`), adaptive probing (`DontCare` skips the opposite
+  direction), and `build_envelope`, which compiles `hard_invariants` (targeted anchor telemetry
+  only on flinched axes), `verified_tolerances`, `boundary_counterexamples`, and
+  `contrastive_pairs` into `Manifest` v2 (`src/manifest.rs`) and page 1 of the PDF (`src/pdf/mod.rs`).
+- `native/src/theme.rs` defines the Linear/Raycast-inspired 4-tier Obsidian/Alabaster Rune token
+  system (`bg_canvas`, `bg_rail`, `bg_surface`, `bg_elevated`, 1px `border_hair`, Linear indigo
+  `#5E6AD2` primary CTA, semantic `keep`/`flinch`/`contrast`, and `kbd` keycap badges) used across
+  `main.rs`, `shelf.rs`, `calibrate_view.rs`, `inspector.rs`, and `files.rs`.
+
 ## Data contract
 
 `src/model.rs` is the only definition of a project. It is serialised as-is to `project.json` (in

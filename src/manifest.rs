@@ -3,7 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Medium, Polarity, Project, Scope, Shape};
+use crate::calibrate::{self, Envelope};
+use crate::model::{Polarity, Project, Shape};
 use crate::telemetry::{self, Bitmap, ColorCluster, ContrastReading, GeometryReading, SurroundReading};
 
 /// The measurements taken for one annotation, from the artifact's untouched pixels.
@@ -13,15 +14,15 @@ pub struct Reading {
     pub artifact: u32,
     pub artifact_name: String,
     pub polarity: Polarity,
-    pub scope: Scope,
-    pub medium: Medium,
+    /// Short labels the curator typed for this marking, verbatim, in the order they added them.
+    #[serde(default)]
+    pub labels: Vec<String>,
     pub shape: Shape,
     /// Normalized artifact-space region, exactly as stored.
     pub region: [f32; 4],
     /// Normalized freehand polyline, when the marking had one.
     pub points: Vec<[f32; 2]>,
     pub page: Option<u32>,
-    pub chips: Vec<SpectrumReading>,
     pub notes: Vec<String>,
     pub verbatim: Option<String>,
     pub clusters: Vec<ColorCluster>,
@@ -30,27 +31,16 @@ pub struct Reading {
     pub surround: Option<SurroundReading>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SpectrumReading {
-    pub dial: String,
-    /// 0 at the left word, 1 at the right.
-    pub value: f32,
-    pub left: String,
-    pub right: String,
-}
-
-/// A contradiction the curator left in place: the same scope and medium, opposite polarity, and
-/// perceptual dials that point different ways.
+/// A contradiction the curator left in place: the same label on two markings of opposite
+/// polarity. Only labels they typed can conflict, so the app never invents the argument.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Conflict {
-    pub scope: String,
-    pub medium: String,
+    /// The shared label, exactly as typed.
+    pub label: String,
     pub like: u32,
     pub avoid: u32,
     /// Plain-language description, for the human reading the PDF and the agent reading the JSON.
     pub summary: String,
-    /// Which dial disagrees, if the two readings name one.
-    pub dial: Option<String>,
 }
 
 /// The whole exported packet.
@@ -60,9 +50,12 @@ pub struct Manifest {
     pub version: u32,
     pub project: String,
     pub artifacts: Vec<ManifestArtifact>,
+    /// The Empirical Acceptance Envelope derived from counterfactual calibration and contrastive pairs.
+    #[serde(default)]
+    pub envelope: Envelope,
     pub readings: Vec<Reading>,
     pub conflicts: Vec<Conflict>,
-    /// One line per polarity/scope pair the agent should act on, written plainly.
+    /// One line per polarity and label group the agent should act on, written plainly.
     pub summary: Vec<String>,
     /// A literal prompt a cold agent can be handed with this PDF.
     pub cold_agent_prompt: String,
@@ -79,30 +72,30 @@ pub struct ManifestArtifact {
 }
 
 pub const COLD_AGENT_PROMPT: &str = "\
-You are given one PDF and nothing else. It describes a person's taste in visual design \
-through selections they made on images, code and documents.
+You are given one PDF and its embedded taste-manifest.json. Together they describe a person's \
+taste through an Empirical Acceptance Envelope (axes tested by perturbing their references until \
+they flinched), contrastive pairs ('this, not that'), and optional marked details.
 
-Read it this way:
-1. The synthesis summary lists what they consistently like and what they must avoid, \
-   plus any contradictions already resolved with them.
-2. Each detail plate pairs an unoccluded crop with structured facts: polarity \
-   (like / must avoid / contrast), what it is about (color, space, type, shape, surface, \
-   feel), where it applies (UI, web, video, image), the four perceptual dials, the user's \
-   own words, and exact measurements (OKLCH colors, contrast ratio, proportions).
-3. Prefer the numbers over your impression of the crop. A color's OKLCH values are the \
-   color they want. A contrast ratio tells you how bold to be. Proportions tell you the \
-   aspect of the shapes to use.
+Read it in this order:
+1. Target context & Hard Invariants (envelope.hard_invariants): these are the axes where \
+   perturbing a reference caused the curator to flinch ('Lost it'). Preserve the anchor's \
+   measured state on these axes and stay well inside the named flinch boundaries.
+2. Verified Tolerances / Free Variables (envelope.verified_tolerances): these are axes the \
+   curator explicitly tested and did NOT flinch on ('Still has it' or 'Don't care'). You are \
+   free to adapt these dimensions to the target's content rather than cloning the reference.
+3. Contrastive Pairs (envelope.contrastive_pairs) & Boundary Counterexamples: optimize away \
+   from the foils and rejected states toward the anchors.
+4. Detail plates & notes: read the curator's words and labels. Use exact OKLCH / contrast \
+   measurements ONLY on dimensions that triggered a flinch or are explicitly named in a note; \
+   do NOT overfit to drag-box aspect ratios or incidental pixel clusters.
 
-Then produce:
-- a semantic OKLCH token set (named roles such as surface, ink, accent, muted), with each \
-  token's L, C and H taken from the like-telemetry and keeping clear of every must-avoid \
-  color, at a contrast ratio at least as strong as the like-side readings;
-- a specimen sheet that applies those tokens, with the perceptual dials honored \
-  (for example tight spacing if the tight-airy dial sits low on like side);
-- one sentence per token saying which observation it came from.
+Before generating your solution:
+- List the Hard Invariants you are locking, the Verified Tolerances you are adapting freely, \
+  and any remaining visual decision you still have to assume.
+- Produce a semantic OKLCH token set and a specimen tailored to envelope.target, with one \
+  sentence per token citing the invariant, contrastive pair, or observation it came from.
 
-Do not add styles that no observation supports. Where the PDF says two things conflict, \
-follow the medium that matches your target.";
+Where two notes conflict, follow the one whose note matches the target more closely.";
 
 /// Build the manifest and every reading for a project.
 pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bitmap>) -> Manifest {
@@ -120,16 +113,11 @@ pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bit
             artifact: artifact_id,
             artifact_name: artifact.name.clone(),
             polarity: annotation.polarity,
-            scope: annotation.scope,
-            medium: annotation.medium,
+            labels: annotation.labels.clone(),
             shape: annotation.shape,
             region: [annotation.region.x0, annotation.region.y0, annotation.region.x1, annotation.region.y1],
             points: annotation.points.clone(),
             page: annotation.page,
-            chips: annotation.chips.iter().map(|(dial, value)| {
-                let (left, right) = dial.ends();
-                SpectrumReading { dial: dial.slug().into(), value: *value, left: left.into(), right: right.into() }
-            }).collect(),
             notes: annotation.notes.iter().map(|n| n.text.clone()).filter(|t| !t.trim().is_empty()).collect(),
             verbatim,
             clusters,
@@ -138,8 +126,37 @@ pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bit
             surround,
         });
     }
+    let envelope = calibrate::build_envelope(project, bitmaps);
     let conflicts = find_conflicts(&readings);
-    let summary = summarize(&readings, &conflicts);
+    let mut summary = Vec::new();
+    if !envelope.target.trim().is_empty() {
+        summary.push(format!("Target: {}", envelope.target.trim()));
+    }
+    if !envelope.hard_invariants.is_empty() {
+        let names: Vec<String> = envelope
+            .hard_invariants
+            .iter()
+            .map(|h| format!("{} ({})", h.axis.label(), h.flinch_boundaries.join(", ")))
+            .collect();
+        summary.push(format!("Hard invariants (flinched when moved): {}.", names.join("; ")));
+    }
+    if !envelope.verified_tolerances.is_empty() {
+        let names: Vec<&str> = envelope
+            .verified_tolerances
+            .iter()
+            .map(|v| v.axis.label())
+            .collect();
+        summary.push(format!("Verified free to adapt: {}.", names.join(", ")));
+    }
+    for pair in &envelope.contrastive_pairs {
+        let tail = if pair.note.trim().is_empty() {
+            pair.measured_delta.clone()
+        } else {
+            pair.note.trim().to_string()
+        };
+        summary.push(format!("This, not that: {} over {} — {tail}.", pair.anchor_name, pair.foil_name));
+    }
+    summary.extend(summarize(&readings, &conflicts));
     let artifacts = project.artifacts.iter().map(|a| {
         let (kind, size, pages) = match &a.source {
             crate::model::ArtifactSource::Image { width, height, .. } => ("image".to_string(), format!("{width}×{height}px"), 1),
@@ -156,9 +173,10 @@ pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bit
     }).collect();
     Manifest {
         format: "taste-curator/manifest".into(),
-        version: 1,
+        version: 2,
         project: project.name.clone(),
         artifacts,
+        envelope,
         readings,
         conflicts,
         summary,
@@ -166,37 +184,30 @@ pub fn build(project: &Project, bitmaps: &dyn Fn(u32, Option<u32>) -> Option<Bit
     }
 }
 
-/// Two readings conflict when they share a scope and medium with opposite polarity, and either
-/// name the same dial in opposite halves.
+/// Two readings conflict when the curator put the same label on a marking they like and a
+/// marking they avoid. Only their own words can make a conflict, so nothing is inferred.
 pub fn find_conflicts(readings: &[Reading]) -> Vec<Conflict> {
     let mut out = Vec::new();
     for like in readings.iter().filter(|r| r.polarity == Polarity::Like) {
         for avoid in readings.iter().filter(|r| r.polarity == Polarity::Dislike) {
-            if like.scope != avoid.scope || like.medium != avoid.medium { continue; }
-            let mut dial = None;
-            for chip in &like.chips {
-                if let Some(other) = avoid.chips.iter().find(|c| c.dial == chip.dial) {
-                    if (chip.value - 0.5).abs() > 0.15 && (other.value - 0.5).abs() > 0.15 && (chip.value < 0.5) != (other.value < 0.5) {
-                        dial = Some(chip.dial.clone());
-                    }
-                }
+            let shared = shared_label(&like.labels, &avoid.labels);
+            let Some(label) = shared else { continue };
+            let summary = format!(
+                "“{label}”: marking {} is wanted, marking {} is not. Their notes say why.",
+                like.annotation, avoid.annotation
+            );
+            if out.iter().any(|c: &Conflict| c.label.eq_ignore_ascii_case(&label) && c.like == like.annotation && c.avoid == avoid.annotation) {
+                continue;
             }
-            let scope = like.scope.label();
-            let medium = like.medium.label();
-            let summary = match &dial {
-                Some(d) => format!(
-                    "{scope} in {medium}: keep the {} side (marking {}), but avoid the {} side (marking {}).",
-                    like.chips.iter().find(|c| &c.dial == d).map(|c| if c.value < 0.5 { c.left.clone() } else { c.right.clone() }).unwrap_or_default(),
-                    like.annotation,
-                    avoid.chips.iter().find(|c| &c.dial == d).map(|c| if c.value < 0.5 { c.left.clone() } else { c.right.clone() }).unwrap_or_default(),
-                    avoid.annotation,
-                ),
-                None => format!("{scope} in {medium}: marking {} is wanted, marking {} is not, and no dial separates them.", like.annotation, avoid.annotation),
-            };
-            out.push(Conflict { scope: scope.into(), medium: medium.into(), like: like.annotation, avoid: avoid.annotation, summary, dial });
+            out.push(Conflict { label, like: like.annotation, avoid: avoid.annotation, summary });
         }
     }
     out
+}
+
+/// The first label both markings carry, compared case-insensitively.
+fn shared_label(a: &[String], b: &[String]) -> Option<String> {
+    a.iter().find(|x| b.iter().any(|y| y.eq_ignore_ascii_case(x))).cloned()
 }
 
 /// Plain sentences the human and the agent both get at the front of the PDF.
@@ -205,22 +216,32 @@ pub fn summarize(readings: &[Reading], conflicts: &[Conflict]) -> Vec<String> {
     for polarity in [Polarity::Like, Polarity::Dislike, Polarity::Contrast] {
         let group: Vec<&Reading> = readings.iter().filter(|r| r.polarity == polarity).collect();
         if group.is_empty() { continue; }
-        let scopes: Vec<&str> = group.iter().map(|r| r.scope.label()).collect::<Vec<_>>();
-        let unique = dedupe(&scopes);
+        let mut labels: Vec<String> = Vec::new();
+        for reading in &group {
+            for label in &reading.labels {
+                if !labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
+                    labels.push(label.clone());
+                }
+            }
+        }
+        let about = if labels.is_empty() {
+            "with no labels yet".to_string()
+        } else {
+            format!("about {}", labels.join(", "))
+        };
         lines.push(format!(
-            "{}: {} marking{} about {}.",
+            "{}: {} marking{} {about}.",
             polarity.label(),
             group.len(),
             if group.len() == 1 { "" } else { "s" },
-            unique.join(", ")
         ));
     }
     for reading in readings {
         if let Some(contrast) = &reading.contrast {
             if contrast.ratio < 3.0 {
                 lines.push(format!(
-                    "Marking {} ({} on {}): {} contrast, {} — worth knowing if it is a Like.",
-                    reading.annotation, reading.polarity.label(), reading.scope.label(),
+                    "Marking {} ({}): {} contrast, {} — a fact, not a verdict.",
+                    reading.annotation, reading.polarity.label(),
                     format!("{:.1}:1", contrast.ratio), contrast.level
                 ));
             }
@@ -233,23 +254,20 @@ pub fn summarize(readings: &[Reading], conflicts: &[Conflict]) -> Vec<String> {
     lines
 }
 
-fn dedupe(items: &[&str]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for item in items {
-        if !out.iter().any(|o| o == item) { out.push((*item).to_string()); }
-    }
-    out
-}
-
-/// The plain-language name of a reading, used in plate headings: "Like · Color · UI".
+/// The plain-language name of a reading, used in plate headings without inventing a category.
 pub fn headline(reading: &Reading) -> String {
-    format!("{} · {} · {}", reading.polarity.label(), reading.scope.label(), reading.medium.label())
+    let about = if reading.labels.is_empty() {
+        "no labels".to_string()
+    } else {
+        reading.labels.join(", ")
+    };
+    format!("{} · {}", reading.polarity.label(), about)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Annotation, ArtifactSource, NormRect, Spectrum};
+    use crate::model::{Annotation, ArtifactSource, NormRect};
     use crate::telemetry::Bitmap;
 
     fn white_plate_with_dark_patch() -> Bitmap {
@@ -270,12 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_carries_exact_telemetry() {
+    fn manifest_carries_exact_telemetry_and_the_curator_s_words() {
         let b = white_plate_with_dark_patch();
         // The region spans the dark patch and the plate around it, as a real selection would.
         let mut a = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.1, 0.1, 0.9, 0.9));
-        a.scope = Scope::Color;
-        a.set_chip(Spectrum::TightAiry, Some(0.2));
+        a.add_label("this ink");
         a.notes.push(crate::model::Note { text: "this ink feels right".into() });
         let p = project_with(vec![a]);
         let m = build(&p, &|_, _| Some(b.clone()));
@@ -284,41 +301,44 @@ mod tests {
         assert!(r.contrast.as_ref().map(|c| c.ratio).unwrap_or(0.0) > 10.0, "{:?}", r.clusters);
         assert!((r.region[2] - 0.9).abs() < 1e-6);
         assert_eq!(r.notes, vec!["this ink feels right".to_string()]);
-        assert_eq!(r.chips[0].dial, "tight_airy");
-        assert!(m.summary.iter().any(|s| s.starts_with("Like: 1 marking")));
+        assert_eq!(r.labels, vec!["this ink".to_string()]);
+        assert!(m.summary.iter().any(|s| s.starts_with("Like: 1 marking about this ink")));
         assert!(m.cold_agent_prompt.contains("OKLCH"));
     }
 
     #[test]
-    fn opposite_halves_of_one_dial_in_one_scope_conflict() {
+    fn a_label_on_a_like_and_an_avoid_is_a_conflict() {
         let b = white_plate_with_dark_patch();
         let mut like = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.25, 0.25, 0.6, 0.6));
-        like.scope = Scope::SpacingDensity;
-        like.set_chip(Spectrum::TightAiry, Some(0.1));
+        like.add_label("margins");
         let mut avoid = Annotation::new(2, Polarity::Dislike, Shape::Rect, NormRect::new(0.0, 0.0, 0.2, 0.2));
-        avoid.scope = Scope::SpacingDensity;
-        avoid.set_chip(Spectrum::TightAiry, Some(0.9));
+        avoid.add_label("Margins");
         let p = project_with(vec![like, avoid]);
         let m = build(&p, &|_, _| Some(b.clone()));
         assert_eq!(m.conflicts.len(), 1);
         let c = &m.conflicts[0];
-        assert_eq!(c.dial.as_deref(), Some("tight_airy"));
-        assert!(c.summary.contains("keep the tight side") && c.summary.contains("avoid the airy side"), "{}", c.summary);
+        assert_eq!(c.label, "margins");
+        assert!(c.summary.contains("marking 1") && c.summary.contains("marking 2"), "{}", c.summary);
     }
 
     #[test]
-    fn different_media_do_not_conflict() {
+    fn different_labels_never_conflict() {
         let b = white_plate_with_dark_patch();
         let mut like = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.25, 0.25, 0.6, 0.6));
-        like.scope = Scope::Color;
-        like.medium = Medium::Ui;
-        like.set_chip(Spectrum::WarmClinical, Some(0.1));
+        like.add_label("margins");
         let mut avoid = Annotation::new(2, Polarity::Dislike, Shape::Rect, NormRect::new(0.0, 0.0, 0.2, 0.2));
-        avoid.scope = Scope::Color;
-        avoid.medium = Medium::Video;
-        avoid.set_chip(Spectrum::WarmClinical, Some(0.9));
+        avoid.add_label("line weight");
         let m = build(&project_with(vec![like, avoid]), &|_, _| Some(b.clone()));
-        assert!(m.conflicts.is_empty());
+        assert!(m.conflicts.is_empty(), "the app only ever compares words the curator typed: {:?}", m.conflicts);
+    }
+
+    #[test]
+    fn a_marking_with_no_labels_still_reads_plainly() {
+        let b = white_plate_with_dark_patch();
+        let a = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.25, 0.25, 0.6, 0.6));
+        let m = build(&project_with(vec![a]), &|_, _| Some(b.clone()));
+        assert_eq!(headline(&m.readings[0]), "Like · no labels");
+        assert!(m.summary.iter().any(|s| s.contains("with no labels yet")), "{:?}", m.summary);
     }
 
     #[test]

@@ -251,6 +251,37 @@ fn synthesis_page(doc: &mut Document, fonts: &mut Fonts, table: &mut FontTable, 
         }
         if y > PAGE_H - MARGIN * 2.0 { break; }
     }
+    if !m.envelope.is_empty() && y < PAGE_H - MARGIN * 2.5 {
+        y += 8.0;
+        y = paragraph(&mut surface, fonts, table, "Empirical acceptance envelope", 10.0, MARGIN, y, CONTENT_W, 500.0, c(INK)) + 3.0;
+        for inv in &m.envelope.hard_invariants {
+            if y > PAGE_H - MARGIN * 1.8 { break; }
+            let row = format!(
+                "LOCK {} ({}) — broke on: {} · {}",
+                inv.axis.label(),
+                inv.artifact_name,
+                inv.flinch_boundaries.join(", "),
+                inv.measured_anchor
+            );
+            y = mono_line(&mut surface, fonts, table, &row, 8.0, MARGIN, y, CONTENT_W, c(INK)) + 2.0;
+        }
+        for tol in &m.envelope.verified_tolerances {
+            if y > PAGE_H - MARGIN * 1.8 { break; }
+            let row = format!("FREE {} ({}) — {}", tol.axis.label(), tol.artifact_name, tol.reason);
+            y = mono_line(&mut surface, fonts, table, &row, 8.0, MARGIN, y, CONTENT_W, c(MUTED)) + 1.5;
+        }
+        for pair in &m.envelope.contrastive_pairs {
+            if y > PAGE_H - MARGIN * 1.8 { break; }
+            let row = format!(
+                "PAIR {} over {} — {} ({})",
+                pair.anchor_name,
+                pair.foil_name,
+                if pair.note.trim().is_empty() { "contrastive boundary" } else { pair.note.trim() },
+                pair.measured_delta
+            );
+            y = mono_line(&mut surface, fonts, table, &row, 8.0, MARGIN, y, CONTENT_W, c(INK)) + 2.0;
+        }
+    }
     y += 10.0;
     // The artifacts table: what this packet was built from.
     y = paragraph(&mut surface, fonts, table, "Sources", 10.0, MARGIN, y, CONTENT_W, 500.0, c(INK)) + 3.0;
@@ -259,27 +290,32 @@ fn synthesis_page(doc: &mut Document, fonts: &mut Fonts, table: &mut FontTable, 
         y = mono_line(&mut surface, fonts, table, &row, 8.5, MARGIN, y, CONTENT_W, c(MUTED)) + 1.0;
     }
     y += 10.0;
-    // The dials in play, at a glance: one line per dial that any marking moved.
-    y = paragraph(&mut surface, fonts, table, "What the dials say", 10.0, MARGIN, y, CONTENT_W, 500.0, c(INK)) + 4.0;
-    let mut dials: Vec<(&str, &str, &str, Vec<(f32, Polarity)>)> = Vec::new();
+    // The curator's own vocabulary: every label they typed, with which polarity it names.
+    // Words they never wrote never appear.
+    let mut vocab: Vec<(&str, Vec<Polarity>)> = Vec::new();
     for r in &m.readings {
-        for chip in &r.chips {
-            match dials.iter_mut().find(|(d, _, _, _)| *d == chip.dial) {
-                Some((_, _, _, values)) => values.push((chip.value, r.polarity)),
-                None => dials.push((chip.dial.as_str(), chip.left.as_str(), chip.right.as_str(), vec![(chip.value, r.polarity)])),
+        for label in &r.labels {
+            match vocab.iter_mut().find(|(w, _)| w.eq_ignore_ascii_case(label)) {
+                Some((_, pols)) => {
+                    if !pols.contains(&r.polarity) { pols.push(r.polarity); }
+                }
+                None => vocab.push((label.as_str(), vec![r.polarity])),
             }
         }
     }
-    for (_, left, right, values) in dials {
-        let track = Placed { x: MARGIN + 96.0, y: y + 3.0, w: 160.0, h: 2.0 };
-        rect(&mut surface, track, c(HAIR));
-        let label = format!("{}  ↔  {}", left, right);
-        mono_line(&mut surface, fonts, table, &label, 7.5, MARGIN, y, 92.0, c(MUTED));
-        for (value, polarity) in values {
-            let x = track.x + value.clamp(0.0, 1.0) * track.w;
-            rect(&mut surface, Placed { x: x - 2.0, y: track.y - 2.5, w: 4.0, h: 7.0 }, polarity_color(polarity));
+    if !vocab.is_empty() {
+        y = paragraph(&mut surface, fonts, table, "In their words", 10.0, MARGIN, y, CONTENT_W, 500.0, c(INK)) + 4.0;
+        for (label, pols) in vocab {
+            let mut x = MARGIN;
+            let b = fonts.shape(label, 8.5, 160.0, 500.0, c(INK), false);
+            fonts.draw(&mut surface, &b, x, y, table);
+            x += 168.0;
+            for polarity in pols {
+                mono_line(&mut surface, fonts, table, polarity.label(), 7.5, x, y + 1.0, 70.0, polarity_color(polarity));
+                x += 74.0;
+            }
+            y += 13.0;
         }
-        y += 13.0;
     }
     surface.finish();
     page.finish();
@@ -412,24 +448,15 @@ fn detail_page(
             if ly > PAGE_H - MARGIN - 60.0 { break; }
         }
         if said == 0 {
-            ly = paragraph(&mut surface, fonts, table, "(no note — the dials and pixels carry it)", 8.5, MARGIN, ly, col_w, 400.0, c(MUTED)) + 2.0;
+            ly = paragraph(&mut surface, fonts, table, "(no note yet — only the measurement carries this one)", 8.5, MARGIN, ly, col_w, 400.0, c(MUTED)) + 2.0;
         }
         ly += 6.0;
-        ly = paragraph(&mut surface, fonts, table, "Dials", 9.0, MARGIN, ly, col_w, 500.0, c(INK)) + 3.0;
-        if reading.chips.is_empty() {
-            ly = paragraph(&mut surface, fonts, table, "(none moved)", 8.5, MARGIN, ly, col_w, 400.0, c(MUTED)) + 2.0;
+        ly = paragraph(&mut surface, fonts, table, "Their labels", 9.0, MARGIN, ly, col_w, 500.0, c(INK)) + 3.0;
+        if reading.labels.is_empty() {
+            ly = paragraph(&mut surface, fonts, table, "(none yet)", 8.5, MARGIN, ly, col_w, 400.0, c(MUTED)) + 2.0;
         }
-        for chip in &reading.chips {
-            let track = Placed { x: MARGIN + 4.0, y: ly + 5.0, w: col_w - 8.0, h: 1.5 };
-            rect(&mut surface, track, c(HAIR));
-            let x = track.x + chip.value.clamp(0.0, 1.0) * track.w;
-            rect(&mut surface, Placed { x: x - 1.8, y: track.y - 2.2, w: 3.6, h: 6.0 }, color);
-            let ends = format!("{} ↔ {}", chip.left, chip.right);
-            mono_line(&mut surface, fonts, table, &ends, 7.5, MARGIN, ly, col_w * 0.5, c(MUTED));
-            let v = format!("{:+.2}", chip.value * 2.0 - 1.0);
-            let b = fonts.shape(&v, 7.5, 40.0, 400.0, c(MUTED), true);
-            fonts.draw(&mut surface, &b, MARGIN + col_w - 40.0, ly, table);
-            ly += 14.0;
+        for label in &reading.labels {
+            ly = paragraph(&mut surface, fonts, table, &format!("·  {label}"), 8.5, MARGIN + 2.0, ly, col_w - 2.0, 500.0, c(INK)) + 1.0;
         }
 
         // Right column: the numbers.
@@ -492,7 +519,7 @@ fn truncate(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Annotation, ArtifactSource, NormRect, Project, Scope, Shape, Spectrum};
+    use crate::model::{Annotation, ArtifactSource, NormRect, Project, Shape};
 
     /// A 2:1 plate with four distinct coloured blocks, so a crop's pixels are identifiable.
     fn test_plate() -> Bitmap {
@@ -529,14 +556,12 @@ mod tests {
 
     fn annotated() -> Project {
         let mut like = Annotation::new(1, Polarity::Like, Shape::Rect, NormRect::new(0.28, 0.30, 0.46, 0.66));
-        like.scope = Scope::Color;
-        like.set_chip(Spectrum::CrispSoft, Some(0.2));
+        like.add_label("this green");
         like.notes.push(crate::model::Note { text: "this green, exactly".into() });
         let mut avoid = Annotation::new(2, Polarity::Dislike, Shape::Ellipse, NormRect::new(0.62, 0.10, 0.80, 0.40));
-        avoid.scope = Scope::SurfaceTexture;
+        avoid.add_label("plastic shine");
         avoid.notes.push(crate::model::Note { text: "plastic shine".into() });
-        let mut contrast = Annotation::new(3, Polarity::Contrast, Shape::Rect, NormRect::new(0.05, 0.62, 0.22, 0.88));
-        contrast.scope = Scope::Typography;
+        let contrast = Annotation::new(3, Polarity::Contrast, Shape::Rect, NormRect::new(0.05, 0.62, 0.22, 0.88));
         project_with(vec![like, avoid, contrast])
     }
 

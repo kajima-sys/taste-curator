@@ -83,20 +83,23 @@ impl App {
     }
 }
 
-/// The export button in the top bar.
-pub fn export_button(s: &App, t: rune::tok::Theme) -> El {
-    use rune::{text, tok::{radius, type_}};
-    text(if s.exporting { "Exporting…" } else { "Export PDF" })
+/// The primary export CTA in the top bar (Linear indigo button with ⌘E keycap).
+pub fn export_button(s: &App, p: crate::theme::Palette) -> El {
+    use rune::{row, text, TextStyle};
+    let empty = s.project.artifacts.is_empty();
+    row()
         .key("export")
         .role("button")
+        .label("Export PDF")
         .focusable(true)
-        .font(type_::LABEL)
-        .color(rune::Color::BLACK)
+        .gap(6.0)
+        .items_center()
         .px(10.0)
-        .py(4.0)
-        .radius(radius::SM)
-        .fill(if s.project.artifacts.is_empty() { t.control_off } else { t.knob })
-        .hover(t.hover)
+        .py(5.0)
+        .radius(6.0)
+        .fill(if empty { p.bg_surface } else { p.accent })
+        .border(1.0, if empty { p.border_hair } else { p.accent })
+        .hover(if empty { p.hover } else { crate::theme::rgb(0x6C78E0) })
         .on_press_tx(|s: &mut App, tx: &mut Tx| {
             if s.project.artifacts.is_empty() {
                 s.message = "Import a reference first.".into();
@@ -104,6 +107,20 @@ pub fn export_button(s: &App, t: rune::tok::Theme) -> El {
             }
             save(s, tx);
         })
+        .child(
+            text(if s.exporting { "Exporting…" } else { "Export PDF" })
+                .font(TextStyle::new(12.0, 500.0))
+                .color(if empty { p.ink_muted } else { p.on_accent }),
+        )
+        .child(
+            text("Ctrl+E")
+                .font(TextStyle::new(9.5, 500.0))
+                .color(if empty { p.ink_muted } else { crate::theme::rgba(0xFFFFFF, 0.78) })
+                .px(4.0)
+                .py(1.0)
+                .radius(3.0)
+                .fill(if empty { p.kbd_bg } else { crate::theme::rgba(0x000000, 0.22) }),
+        )
 }
 
 /// Kept for headless runs: export without a dialog.

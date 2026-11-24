@@ -1,5 +1,6 @@
 {
   "name": "Studio handoff — spring",
+  "target": "Calm personal research workspace",
   "artifacts": [
     {
       "id": 1,
@@ -14,8 +15,9 @@
         {
           "id": 1,
           "polarity": "like",
-          "scope": "color",
-          "medium": "ui",
+          "labels": [
+            "this green"
+          ],
           "shape": "rect",
           "region": {
             "x0": 0.655,
@@ -24,16 +26,6 @@
             "y1": 0.665
           },
           "points": [],
-          "chips": [
-            [
-              "warm_clinical",
-              0.28
-            ],
-            [
-              "crisp_soft",
-              0.35
-            ]
-          ],
           "notes": [
             {
               "text": "This green exactly — not the minty one. It holds up on white without shouting."
@@ -46,8 +38,10 @@
         {
           "id": 2,
           "polarity": "like",
-          "scope": "spacing_density",
-          "medium": "ui",
+          "labels": [
+            "spacing",
+            "breathing"
+          ],
           "shape": "rect",
           "region": {
             "x0": 0.255,
@@ -56,15 +50,9 @@
             "y1": 0.53
           },
           "points": [],
-          "chips": [
-            [
-              "tight_airy",
-              0.86
-            ]
-          ],
           "notes": [
             {
-              "text": "Room between the cards and around their content. I want this everywhere in the app shell."
+              "text": "Room between the cards and around their content. I want this everywhere."
             }
           ],
           "partner": null,
@@ -74,8 +62,9 @@
         {
           "id": 3,
           "polarity": "dislike",
-          "scope": "spacing_density",
-          "medium": "ui",
+          "labels": [
+            "spacing"
+          ],
           "shape": "rect",
           "region": {
             "x0": 0.02,
@@ -84,12 +73,6 @@
             "y1": 0.92
           },
           "points": [],
-          "chips": [
-            [
-              "tight_airy",
-              0.14
-            ]
-          ],
           "notes": [
             {
               "text": "Rows stacked with no air — every label fights the next one."
@@ -102,8 +85,9 @@
         {
           "id": 4,
           "polarity": "like",
-          "scope": "spacing_density",
-          "medium": "web",
+          "labels": [
+            "rhythm"
+          ],
           "shape": "freehand",
           "region": {
             "x0": 0.265,
@@ -149,15 +133,9 @@
               0.668
             ]
           ],
-          "chips": [
-            [
-              "tight_airy",
-              0.22
-            ]
-          ],
           "notes": [
             {
-              "text": "But a dense table is fine when the rhythm is regular. Tight is not the problem; ragged is."
+              "text": "A dense table is fine when the rhythm is regular. Tight is not the problem; ragged is."
             }
           ],
           "partner": null,
@@ -179,8 +157,9 @@
         {
           "id": 5,
           "polarity": "like",
-          "scope": "typography",
-          "medium": "illustration",
+          "labels": [
+            "letterforms"
+          ],
           "shape": "rect",
           "region": {
             "x0": 0.075,
@@ -189,12 +168,6 @@
             "y1": 0.325
           },
           "points": [],
-          "chips": [
-            [
-              "crisp_soft",
-              0.18
-            ]
-          ],
           "notes": [
             {
               "text": "Heavy, tight tracking, no softness in the letterforms. This is the tone for editorial pieces."
@@ -207,8 +180,9 @@
         {
           "id": 6,
           "polarity": "dislike",
-          "scope": "surface_texture",
-          "medium": "illustration",
+          "labels": [
+            "surface"
+          ],
           "shape": "ellipse",
           "region": {
             "x0": 0.6,
@@ -217,12 +191,6 @@
             "y1": 0.66
           },
           "points": [],
-          "chips": [
-            [
-              "flat_layered",
-              0.82
-            ]
-          ],
           "notes": [
             {
               "text": "Plasticky sheen over a flat field. Reads as a template."
@@ -235,8 +203,9 @@
         {
           "id": 7,
           "polarity": "like",
-          "scope": "typography",
-          "medium": "web",
+          "labels": [
+            "letterforms"
+          ],
           "shape": "text_span",
           "region": {
             "x0": 0.075,
@@ -245,7 +214,6 @@
             "y1": 0.645
           },
           "points": [],
-          "chips": [],
           "notes": [
             {
               "text": "Keep this pairing: slightly negative tracking with balanced wraps."
@@ -277,8 +245,9 @@
         {
           "id": 8,
           "polarity": "contrast",
-          "scope": "color",
-          "medium": "web",
+          "labels": [
+            "neutrals"
+          ],
           "shape": "rect",
           "region": {
             "x0": 0.09,
@@ -287,12 +256,6 @@
             "y1": 0.46
           },
           "points": [],
-          "chips": [
-            [
-              "warm_clinical",
-              0.76
-            ]
-          ],
           "notes": [
             {
               "text": "Take the restraint of the top row, not its coldness — warm the neutrals by about ten degrees."
@@ -316,6 +279,49 @@
       "annotations": []
     }
   ],
+  "probes": [
+    {
+      "artifact": 1,
+      "axis": "warmth",
+      "direction": "negative",
+      "strength": 0.65,
+      "verdict": "lost_it",
+      "note": "feels too clinical when pushed cold"
+    },
+    {
+      "artifact": 1,
+      "axis": "warmth",
+      "direction": "positive",
+      "strength": 0.65,
+      "verdict": "still_has_it",
+      "note": ""
+    },
+    {
+      "artifact": 1,
+      "axis": "contrast",
+      "direction": "negative",
+      "strength": 0.65,
+      "verdict": "lost_it",
+      "note": "loses legibility when flattened"
+    },
+    {
+      "artifact": 1,
+      "axis": "chroma",
+      "direction": "negative",
+      "strength": 0.65,
+      "verdict": "dont_care",
+      "note": ""
+    }
+  ],
+  "pairs": [
+    {
+      "id": 1,
+      "anchor": 1,
+      "foil": 2,
+      "note": "Keep the calm ground of the dashboard, not the glossy contrast of the poster"
+    }
+  ],
   "next_artifact": 5,
-  "next_annotation": 9
+  "next_annotation": 9,
+  "next_pair": 2
 }

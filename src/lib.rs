@@ -1,4 +1,5 @@
 pub mod artifact;
+pub mod calibrate;
 pub mod camera;
 pub mod html;
 pub mod manifest;

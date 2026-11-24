@@ -5,11 +5,36 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use taste_curator::calibrate::{self, DEFAULT_STRENGTH};
 use taste_curator::camera::Camera;
-use taste_curator::model::{Annotation, ArtifactSource, Medium, Note, Polarity, Project, Scope, Shape, Spectrum};
+use taste_curator::model::{
+    Annotation, ArtifactSource, FlinchVerdict, Note, Polarity, ProbeAxis, ProbeDirection,
+    ProbeJudgment, Project, Shape,
+};
 use taste_curator::telemetry::Bitmap;
 use taste_curator::tools::Tool;
 use rune::{Pixels, TextEdit};
+
+/// Which workspace is open: counterfactual calibration ("Perturb Until They Flinch") or
+/// region markup on the canvas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Workspace {
+    #[default]
+    Calibrate,
+    MarkUp,
+}
+
+/// Cached side-by-side pixels for the active counterfactual probe.
+pub struct ProbePreview {
+    pub artifact: u32,
+    pub axis: ProbeAxis,
+    pub direction: ProbeDirection,
+    pub strength: f32,
+    pub anchor: Pixels,
+    pub perturbed: Pixels,
+    pub width: u32,
+    pub height: u32,
+}
 
 /// The substrate of one artifact page, decoded once and kept: raw pixels plus the handle Rune
 /// draws them through.
@@ -31,6 +56,7 @@ pub enum Mode {
 
 pub struct App {
     pub project: Project,
+    pub workspace: Workspace,
     pub tool: Tool,
     pub mode: Mode,
     pub camera: Camera,
@@ -43,13 +69,27 @@ pub struct App {
     pub selected: Option<u32>,
     pub note: TextEdit,
     pub note_for: Option<u32>,
+    /// The label being typed in the inspector's "add a word" field.
+    pub label_draft: TextEdit,
+    pub label_for: Option<u32>,
+    /// Target context ("What are you building?"), synced into `project.target`.
+    pub target_draft: TextEdit,
+    /// Active counterfactual probe `(axis, direction, strength)` for `self.active`.
+    pub active_probe: Option<(ProbeAxis, ProbeDirection, f32)>,
+    /// Cached anchor + perturbed pixels for the active probe.
+    pub probe_preview: Option<ProbePreview>,
+    /// Optional note when pairing an anchor against a foil ("This, not that").
+    pub pair_note: TextEdit,
     pub status: String,
     pub message: String,
     pub dark: bool,
     pub history: Vec<Project>,
     pub exporting: bool,
-    /// A short readout of the selected marking's unannotated pixels.
+    /// A short readout of the selected marking's unannotated pixels, in plain words.
     pub readout: Vec<String>,
+    /// The curved readout under "exact values": numbers only, hidden by default.
+    pub exact: Vec<String>,
+    pub show_values: bool,
     /// The JSON last written to disk, so saving only happens on a real change.
     pub last_saved: String,
     pub saved_to: Option<std::path::PathBuf>,
@@ -59,6 +99,7 @@ impl Default for App {
     fn default() -> Self {
         App {
             project: Project::default(),
+            workspace: Workspace::Calibrate,
             tool: Tool::Select,
             mode: Mode::Idle,
             camera: Camera::default(),
@@ -70,12 +111,20 @@ impl Default for App {
             selected: None,
             note: TextEdit::new(""),
             note_for: None,
+            label_draft: TextEdit::new(""),
+            label_for: None,
+            target_draft: TextEdit::new(""),
+            active_probe: None,
+            probe_preview: None,
+            pair_note: TextEdit::new(""),
             status: Tool::Select.hint().to_string(),
             message: String::new(),
             dark: true,
             history: Vec::new(),
             exporting: false,
             readout: Vec::new(),
+            exact: Vec::new(),
+            show_values: false,
             last_saved: String::new(),
             saved_to: None,
         }
@@ -99,6 +148,10 @@ impl App {
             if self.active.is_some_and(|id| self.project.artifact(id).is_none()) {
                 self.active = self.project.artifacts.first().map(|a| a.id);
             }
+            self.target_draft = TextEdit::new(&self.project.target);
+            self.active_probe = None;
+            self.probe_preview = None;
+            self.refresh_probe();
             self.message = "Undone".into();
         }
     }
@@ -162,6 +215,9 @@ impl App {
         self.mode = Mode::Idle;
         self.fit();
         self.ensure_loaded(id, 1);
+        self.active_probe = None;
+        self.probe_preview = None;
+        self.refresh_probe();
         self.message.clear();
     }
 
@@ -260,12 +316,10 @@ impl App {
             self.mode = Mode::Idle;
             return;
         };
-        let medium = medium_for(self.project.artifact(artifact).map(|a| &a.source));
         let page = self.can_page().then_some(self.page);
         self.remember();
         let id = self.project.add_annotation(artifact, Polarity::Like, shape, region);
         if let Some(n) = self.project.annotation_mut(artifact, id) {
-            n.medium = medium;
             n.page = page;
             if shape == Shape::Freehand {
                 n.points = points;
@@ -294,6 +348,8 @@ impl App {
         }
         self.note = TextEdit::new(text);
         self.note_for = Some(id);
+        self.label_draft = TextEdit::new("");
+        self.label_for = Some(id);
         self.mode = Mode::Idle;
         self.refresh_readout();
     }
@@ -331,26 +387,145 @@ impl App {
         }
     }
 
-    /// A plain-language readout of the selection from its untouched pixels.
+    /// Keep `project.target` synced with the inspector's "What are you building?" field.
+    pub fn sync_target(&mut self) {
+        let trimmed = self.target_draft.text.trim();
+        if self.project.target != trimmed {
+            self.project.target = trimmed.to_string();
+        }
+    }
+
+    /// Ensure the active counterfactual probe has cached anchor + perturbed bitmaps ready.
+    pub fn refresh_probe(&mut self) {
+        let Some(artifact) = self.active else {
+            self.active_probe = None;
+            self.probe_preview = None;
+            return;
+        };
+        if self.active_probe.is_none() {
+            self.active_probe = calibrate::next_probe(&self.project, artifact);
+        }
+        let Some((axis, direction, strength)) = self.active_probe else {
+            self.probe_preview = None;
+            return;
+        };
+        if let Some(p) = &self.probe_preview {
+            if p.artifact == artifact
+                && p.axis == axis
+                && p.direction == direction
+                && (p.strength - strength).abs() < 1e-4
+            {
+                return;
+            }
+        }
+        let Some(page) = self.pages.get(&(artifact, self.page)) else {
+            self.probe_preview = None;
+            return;
+        };
+        let base = calibrate::preview_bitmap(&page.bitmap, 440);
+        let perturbed_bm = calibrate::perturb(&base, axis, direction, strength);
+        let anchor = Pixels::new();
+        anchor.set(base.width, base.height, base.rgba);
+        let perturbed = Pixels::new();
+        perturbed.set(perturbed_bm.width, perturbed_bm.height, perturbed_bm.rgba);
+        self.probe_preview = Some(ProbePreview {
+            artifact,
+            axis,
+            direction,
+            strength,
+            anchor,
+            perturbed,
+            width: base.width,
+            height: base.height,
+        });
+    }
+
+    /// Jump directly to a specific perturbation axis and direction on the active reference.
+    pub fn select_probe(&mut self, axis: ProbeAxis, direction: ProbeDirection) {
+        self.active_probe = Some((axis, direction, DEFAULT_STRENGTH));
+        self.probe_preview = None;
+        self.refresh_probe();
+    }
+
+    /// Record a flinch judgment for the current probe and advance to the next untested axis.
+    pub fn judge_probe(&mut self, verdict: FlinchVerdict) {
+        let Some(artifact) = self.active else { return };
+        let Some((axis, direction, strength)) = self.active_probe else { return };
+        self.remember();
+        self.project.record_probe(ProbeJudgment {
+            artifact,
+            axis,
+            direction,
+            strength,
+            verdict,
+            note: String::new(),
+        });
+        let change = axis.change_label(direction);
+        self.message = format!("{change}: {}", verdict.label());
+        self.active_probe = calibrate::next_probe(&self.project, artifact);
+        self.probe_preview = None;
+        self.refresh_probe();
+    }
+
+    /// Reset all calibration judgments for the active reference.
+    pub fn reset_calibration(&mut self) {
+        let Some(artifact) = self.active else { return };
+        self.remember();
+        self.project.clear_probes_for(artifact);
+        self.active_probe = None;
+        self.probe_preview = None;
+        self.refresh_probe();
+        self.message = "Calibration reset for this reference".into();
+    }
+
+    /// Record a contrastive pair ("This, not that") with the active artifact as Anchor and `foil`
+    /// as Foil.
+    pub fn commit_pair(&mut self, foil: u32) {
+        let Some(anchor) = self.active else { return };
+        if anchor == foil {
+            return;
+        }
+        let note = self.pair_note.text.trim().to_string();
+        self.remember();
+        self.project.add_pair(anchor, foil, note);
+        self.pair_note = TextEdit::new("");
+        let foil_name = self.project.artifact(foil).map(|a| a.name.clone()).unwrap_or_default();
+        self.message = format!("Paired against {foil_name}");
+    }
+
+    pub fn remove_pair(&mut self, id: u32) {
+        self.remember();
+        self.project.remove_pair(id);
+        self.message = "Pair removed".into();
+    }
+
+    /// A plain-language readout of the selection from its untouched pixels. Facts only: no
+    /// value judgement is made, and the numbers live behind `show_values`.
     pub fn refresh_readout(&mut self) {
         self.readout.clear();
+        self.exact.clear();
         let Some((artifact, region, page)) = self
             .selected_annotation()
             .map(|(a, n)| (a, n.region, n.page))
         else { return };
         let Some(bitmap) = self.page_for(artifact, page).map(|p| p.bitmap.clone()) else { return };
         let clusters = taste_curator::telemetry::dominant_clusters(&bitmap, &region, 4);
-        let mut lines = Vec::new();
-        if let Some(contrast) = taste_curator::telemetry::contrast_reading(&clusters) {
-            lines.push(format!("contrast {:.2}:1 ({})", contrast.ratio, contrast.level));
-        }
         let g = taste_curator::telemetry::geometry_reading(&bitmap, &region);
-        lines.push(format!("{}×{} px · {} · {:.0}% of the frame", g.px_w, g.px_h, g.ratio_name, g.area_share * 100.0));
+        self.readout.push(format!("Size: about {:.0}% of the frame ({})", g.area_share * 100.0, g.ratio_name));
         let colors: Vec<String> = clusters.iter().take(3).map(|c| format!("#{} {:.0}%", c.hex, c.share * 100.0)).collect();
         if !colors.is_empty() {
-            lines.push(colors.join("  "));
+            self.readout.push(format!("Most of it: {}", colors.join("  ")));
         }
-        self.readout = lines;
+        let mut exact = Vec::new();
+        if let Some(contrast) = taste_curator::telemetry::contrast_reading(&clusters) {
+            self.readout.push(format!("Separation between the two nearest colours: {:.1}:1", contrast.ratio));
+            exact.push(format!("contrast {:.2}:1 ({})", contrast.ratio, contrast.level));
+        }
+        exact.push(format!("{}×{} px · {:.0}% of the frame", g.px_w, g.px_h, g.area_share * 100.0));
+        for c in clusters.iter().take(4) {
+            exact.push(format!("#{}  {:.0}%  oklch({:.3} {:.3} {:.1})", c.hex, c.share * 100.0, c.oklch.l, c.oklch.c, c.oklch.h));
+        }
+        self.exact = exact;
     }
 
     fn page_for(&self, artifact: u32, page: Option<u32>) -> Option<&Page> {
@@ -366,39 +541,43 @@ impl App {
         }
     }
 
-    pub fn set_scope(&mut self, scope: Scope) {
+    /// Flip one label on the selected marking. A press takes it back off, so a wrong chip costs
+    /// one click and nothing has to be cleared out later.
+    pub fn toggle_label(&mut self, label: &str) {
         let Some(id) = self.selected else { return };
         let Some((artifact, _)) = self.find(id) else { return };
-        self.remember();
-        if let Some(n) = self.project.annotation_mut(artifact, id) {
-            n.scope = scope;
+        if self.find(id).is_some_and(|(_, n)| n.has_label(label)) {
+            self.remember();
+            if let Some(n) = self.project.annotation_mut(artifact, id) {
+                n.remove_label(label);
+            }
+        } else {
+            self.remember();
+            if let Some(n) = self.project.annotation_mut(artifact, id) {
+                n.add_label(label);
+            }
         }
     }
 
-    pub fn set_medium(&mut self, medium: Medium) {
+    /// Add the word typed in the inspector's field to the selected marking. The same word on
+    /// another marking is one word, not two: `has_label` compares case-insensitively.
+    pub fn commit_label(&mut self) {
         let Some(id) = self.selected else { return };
         let Some((artifact, _)) = self.find(id) else { return };
+        let word = self.label_draft.text.trim().to_string();
+        self.label_draft = TextEdit::new("");
+        if word.is_empty() { return; }
+        if self.find(id).is_some_and(|(_, n)| n.has_label(&word)) { return; }
         self.remember();
         if let Some(n) = self.project.annotation_mut(artifact, id) {
-            n.medium = medium;
+            n.add_label(&word);
         }
+        self.message = format!("“{word}” added — it will be offered back from now on");
     }
 
-    pub fn set_chip(&mut self, dial: Spectrum, value: Option<f32>) {
-        let Some(id) = self.selected else { return };
-        let Some((artifact, _)) = self.find(id) else { return };
-        self.remember();
-        if let Some(n) = self.project.annotation_mut(artifact, id) {
-            n.set_chip(dial, value);
-        }
-    }
-}
-
-pub fn medium_for(source: Option<&ArtifactSource>) -> Medium {
-    match source {
-        Some(ArtifactSource::Text { .. }) => Medium::Web,
-        Some(ArtifactSource::Pdf { .. }) => Medium::Ui,
-        _ => Medium::Illustration,
+    /// Every label in the project, most-used first, to offer back as chips.
+    pub fn vocabulary(&self) -> Vec<(String, usize)> {
+        Annotation::vocabulary(&self.project.artifacts)
     }
 }
 
@@ -415,7 +594,7 @@ pub fn shape_label(shape: Shape) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use taste_curator::model::{NormRect, Polarity, Scope};
+    use taste_curator::model::{NormRect, Polarity};
 
     /// A scratch file unique to this test, so parallel tests never write over each other's
     /// image while another is reading it. Windows made that visible: `img.save` truncates the
@@ -468,7 +647,8 @@ mod tests {
         let page = s.pages.values().next().expect("the page rendered to pixels");
         let g = taste_curator::telemetry::geometry_reading(&page.bitmap, &n.region);
         assert_eq!((g.px_w, g.px_h), (width / 2, height / 2), "geometry comes from the rendered page");
-        assert!(s.readout.iter().any(|l| l.contains("contrast")), "{:?}", s.readout);
+        assert!(s.readout.iter().any(|l| l.starts_with("Size:")), "{:?}", s.readout);
+        assert!(s.readout.iter().any(|l| l.starts_with("Separation")), "{:?}", s.readout);
     }
 
     #[test]
@@ -503,8 +683,12 @@ mod tests {
         assert_eq!(n.shape, Shape::Rect);
         assert!((n.region.width() - 0.4).abs() < 1e-5);
         assert_eq!(s.project.artifact(artifact).unwrap().annotations.len(), 1);
-        assert!(s.readout.iter().any(|l| l.contains("px")), "{:?}", s.readout);
-        assert!(s.readout.iter().any(|l| l.contains("contrast")));
+        // Plain words by default; the numbers live behind "exact values".
+        assert!(s.readout.iter().any(|l| l.starts_with("Size:")), "{:?}", s.readout);
+        assert!(s.readout.iter().any(|l| l.starts_with("Separation")), "{:?}", s.readout);
+        assert!(!s.readout.iter().any(|l| l.contains("px")), "no bare numbers by default: {:?}", s.readout);
+        assert!(s.exact.iter().any(|l| l.contains("px")), "{:?}", s.exact);
+        assert!(s.exact.iter().any(|l| l.contains("oklch")), "{:?}", s.exact);
     }
 
     #[test]
@@ -555,16 +739,18 @@ mod tests {
         s.mode = Mode::Draw { shape: Shape::Rect, start: [0.1, 0.1], current: [0.5, 0.5], points: vec![] };
         s.commit_draft();
         s.set_polarity(Polarity::Dislike);
-        s.set_scope(Scope::Color);
-        s.set_chip(Spectrum::TightAiry, Some(0.25));
+        s.toggle_label("breathing");
+        s.label_draft = rune::TextEdit::new("margins");
+        s.commit_label();
         let (_, n) = s.selected_annotation().unwrap();
         assert_eq!(n.polarity, Polarity::Dislike);
-        assert_eq!(n.scope, Scope::Color);
-        assert_eq!(n.chip(Spectrum::TightAiry), Some(0.25));
+        assert_eq!(n.labels, vec!["breathing".to_string(), "margins".to_string()]);
         s.undo();
         let (_, n) = s.selected_annotation().unwrap();
-        assert_eq!(n.scope, Scope::Color);
-        assert_eq!(n.chip(Spectrum::TightAiry), None);
+        assert_eq!(n.labels, vec!["breathing".to_string()], "undo takes back the last label only");
+        s.toggle_label("breathing");
+        assert!(s.selected_annotation().unwrap().1.labels.is_empty(), "a second press takes it off");
+        assert_eq!(s.label_draft.text, "", "the field empties after adding a word");
     }
 
     #[test]
@@ -600,5 +786,67 @@ mod tests {
         let back = s.to_artifact(s.to_screen(p));
         assert!((back[0] - p[0]).abs() < 1e-3 && (back[1] - p[1]).abs() < 1e-3);
         let _ = NormRect::new(0.0, 0.0, 1.0, 1.0);
+    }
+
+    #[test]
+    fn calibration_records_flinch_advances_probe_and_undoes() {
+        let mut s = seeded();
+        assert_eq!(s.workspace, Workspace::Calibrate);
+        assert!(s.probe_preview.is_some(), "opening an image prepares the first counterfactual probe");
+        let first = s.active_probe.unwrap();
+        assert_eq!(first.0, ProbeAxis::Warmth);
+        assert_eq!(first.1, ProbeDirection::Negative);
+
+        s.judge_probe(FlinchVerdict::LostIt);
+        assert_eq!(s.project.probes.len(), 1);
+        let second = s.active_probe.unwrap();
+        assert_eq!(second.0, ProbeAxis::Warmth);
+        assert_eq!(second.1, ProbeDirection::Positive, "opposite direction is bracketed next");
+
+        s.judge_probe(FlinchVerdict::StillHasIt);
+        let third = s.active_probe.unwrap();
+        assert_eq!(third.0, ProbeAxis::Contrast);
+
+        s.judge_probe(FlinchVerdict::DontCare);
+        let fourth = s.active_probe.unwrap();
+        assert_eq!(fourth.0, ProbeAxis::Chroma, "DontCare skips the opposite direction");
+
+        s.undo();
+        assert_eq!(s.project.probes.len(), 2);
+        assert_eq!(s.active_probe.unwrap().0, ProbeAxis::Contrast);
+    }
+
+    #[test]
+    fn contrastive_pair_and_target_export_into_envelope() {
+        let mut s = seeded();
+        let first_id = s.active.unwrap();
+        // Import a second artifact so we can pair anchor against foil.
+        let path2 = scratch("foil.png");
+        let img = image::RgbaImage::from_fn(64, 64, |_, _| image::Rgba([30, 30, 38, 255]));
+        img.save(&path2).unwrap();
+        s.import(&path2);
+        let foil_id = s.active.unwrap();
+        s.open_artifact(first_id);
+
+        s.target_draft = rune::TextEdit::new("personal reading list page");
+        s.sync_target();
+        s.pair_note = rune::TextEdit::new("keep the calm ground, not the heavy dark surface");
+        s.commit_pair(foil_id);
+        s.judge_probe(FlinchVerdict::LostIt);
+
+        let env = calibrate::build_envelope(&s.project, &|id, page| {
+            s.pages.get(&(id, page.unwrap_or(1))).map(|p| p.bitmap.clone())
+        });
+        assert_eq!(env.target, "personal reading list page");
+        assert_eq!(env.hard_invariants.len(), 1);
+        assert_eq!(env.contrastive_pairs.len(), 1);
+
+        let out = scratch("envelope.pdf");
+        s.export_to(&out);
+        let bytes = std::fs::read(&out).unwrap();
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(raw.contains("taste-manifest.json"));
+        let (bitmap, _, _) = taste_curator::artifact::render_pdf_page(&bytes, 1, 1.0).expect("page 1 renders");
+        assert!(bitmap.width > 100);
     }
 }
