@@ -1,6 +1,7 @@
 pub mod artifact;
 pub mod calibrate;
 pub mod camera;
+pub mod gestures;
 pub mod html;
 pub mod manifest;
 pub mod model;

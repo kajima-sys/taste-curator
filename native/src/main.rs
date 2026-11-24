@@ -299,6 +299,36 @@ fn footer(s: &App, p: Palette) -> El {
         );
     } else {
         out = out.child(
+            row()
+                .key("canvas-hints")
+                .gap(10.0)
+                .items_center()
+                .child(theme::kbd("Scroll", p))
+                .child(
+                    text("Zoom")
+                        .font(TextStyle::new(10.5, 400.0))
+                        .color(p.ink_muted),
+                )
+                .child(theme::kbd("Ctrl", p))
+                .child(
+                    text("Fine zoom")
+                        .font(TextStyle::new(10.5, 400.0))
+                        .color(p.ink_muted),
+                )
+                .child(theme::kbd("Alt", p))
+                .child(
+                    text("Move")
+                        .font(TextStyle::new(10.5, 400.0))
+                        .color(p.ink_muted),
+                )
+                .child(theme::kbd("Middle-drag", p))
+                .child(
+                    text("Pan")
+                        .font(TextStyle::new(10.5, 400.0))
+                        .color(p.ink_muted),
+                ),
+        );
+        out = out.child(
             text(&s.status)
                 .font(TextStyle::new(11.0, 400.0))
                 .color(p.ink_muted)
@@ -434,8 +464,9 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Escape => {
-            if matches!(s.mode, app::Mode::Draw { .. }) {
+            if matches!(s.mode, app::Mode::Draw { .. } | app::Mode::Select { .. } | app::Mode::Pan { .. }) {
                 s.mode = app::Mode::Idle;
+                s.status = s.tool.hint().to_string();
             } else {
                 s.deselect();
             }

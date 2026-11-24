@@ -7,6 +7,7 @@ use std::path::Path;
 
 use taste_curator::calibrate::{self, DEFAULT_STRENGTH};
 use taste_curator::camera::Camera;
+use taste_curator::gestures;
 use taste_curator::model::{
     Annotation, ArtifactSource, FlinchVerdict, Note, Polarity, ProbeAxis, ProbeDirection,
     ProbeJudgment, Project, Shape,
@@ -50,6 +51,10 @@ pub enum Mode {
     Idle,
     /// Moving the picture; `last` is the pointer in screen points.
     Pan { last: [f32; 2] },
+    /// A press with the select tool: it picks `hit` on release unless the pointer travels, in
+    /// which case the same press pans. `press` is where the pointer went down (screen points),
+    /// so a drag that starts under slop doesn't jump when it becomes a pan.
+    Select { press: [f32; 2], last: [f32; 2], hit: Option<u32>, moved: bool },
     /// A marking in progress, in normalized artifact space.
     Draw { shape: Shape, start: [f32; 2], current: [f32; 2], points: Vec<[f32; 2]> },
 }
@@ -200,6 +205,118 @@ impl App {
         let fitted = self.fitted();
         self.camera.zoom_about(anchor, factor, self.viewport, fitted);
         self.status = format!("Zoom {:.0}%", self.camera.zoom * 100.0);
+    }
+
+    /// A wheel event as the canvas sees it, applied. `dy` negative (a turn away from the user)
+    /// zooms in; Ctrl/⌘ fines it, Alt moves the picture, and a sideways wheel moves it sideways.
+    pub fn wheel(&mut self, ev: gestures::Wheel) {
+        match gestures::wheel_command(ev) {
+            gestures::WheelCommand::Zoom { anchor, factor } => self.zoom_about(anchor, factor),
+            gestures::WheelCommand::Pan { by } => {
+                self.camera.pan_by(by);
+                self.status = "Moved".into();
+            }
+        }
+    }
+
+    /// A press on the canvas, in canvas points. The pan tool and the middle button pan at once;
+    /// the select tool records a pending pick; a drawing tool starts its draft.
+    pub fn canvas_press(&mut self, local: [f32; 2], middle: bool) {
+        let at = self.to_artifact(local);
+        if middle || self.tool == Tool::Pan {
+            self.mode = Mode::Pan { last: local };
+            self.status = "Moving the picture".into();
+            return;
+        }
+        if self.tool == Tool::Select {
+            let hit = crate::canvas::hit_test(self, at);
+            self.mode = Mode::Select { press: local, last: local, hit, moved: false };
+            self.status = match hit {
+                Some(_) => "Click to open it, drag to move the picture".into(),
+                None => "Drag to move the picture".into(),
+            };
+            return;
+        }
+        let Some(shape) = self.tool.shape() else {
+            self.deselect();
+            return;
+        };
+        self.deselect();
+        self.mode = Mode::Draw { shape, start: at, current: at, points: vec![at] };
+        self.status = match shape {
+            Shape::Rect => "Drawing a box".into(),
+            Shape::Ellipse => "Drawing an oval".into(),
+            _ => "Drawing around it".into(),
+        };
+    }
+
+    /// The pressed pointer moved to `local`. A select press turns into a pan once it travels
+    /// past [`gestures::CLICK_SLOP`], taking up the travel it already made in the same step, so
+    /// nothing jumps. Returns whether the picture moved.
+    pub fn canvas_drag(&mut self, local: [f32; 2]) -> bool {
+        let at = self.to_artifact(local);
+        match &mut self.mode {
+            Mode::Pan { last } => {
+                let delta = [local[0] - last[0], local[1] - last[1]];
+                self.camera.pan_by(delta);
+                *last = local;
+                true
+            }
+            Mode::Select { press, last, moved, .. } => {
+                if !*moved && gestures::is_click(gestures::travel(*press, local)) {
+                    return false;
+                }
+                let delta = if *moved {
+                    [local[0] - last[0], local[1] - last[1]]
+                } else {
+                    *moved = true;
+                    self.status = "Moving the picture".into();
+                    [local[0] - press[0], local[1] - press[1]]
+                };
+                self.camera.pan_by(delta);
+                *last = local;
+                true
+            }
+            Mode::Draw { shape, current, points, .. } => {
+                *current = at;
+                if *shape == Shape::Freehand
+                    && points.last().is_none_or(|p| (p[0] - at[0]).abs() + (p[1] - at[1]).abs() > 0.001)
+                {
+                    points.push(at);
+                }
+                true
+            }
+            Mode::Idle => false,
+        }
+    }
+
+    /// The press released at `local`. A select press that stayed put picks its marking here, and
+    /// clears the selection when it found none; a draft commits.
+    pub fn canvas_release(&mut self, local: [f32; 2]) {
+        if let Mode::Select { press, hit, .. } = self.mode {
+            self.mode = Mode::Idle;
+            match (gestures::is_click(gestures::travel(press, local)), hit) {
+                (true, Some(id)) => self.select(id),
+                _ => {
+                    self.deselect();
+                    self.status = self.tool.hint().to_string();
+                }
+            }
+            return;
+        }
+        if matches!(self.mode, Mode::Draw { .. }) {
+            let at = self.to_artifact(local);
+            if let Mode::Draw { current, points, shape, .. } = &mut self.mode {
+                *current = at;
+                if *shape == Shape::Freehand && points.last() != Some(&at) {
+                    points.push(at);
+                }
+            }
+            self.commit_draft();
+            return;
+        }
+        self.mode = Mode::Idle;
+        self.status = self.tool.hint().to_string();
     }
 
     pub fn fit(&mut self) {
@@ -779,6 +896,30 @@ mod tests {
         assert!(bitmap.width > 100);
     }
 
+    /// The reported bug: markings visibly slid off the picture while the wheel zoomed. Both are
+    /// placed from one camera rect, so a marking's position *relative to the picture* must not
+    /// move at all as the zoom changes, however many wheel steps happen.
+    #[test]
+    fn markings_stay_locked_to_the_picture_through_a_zoom() {
+        let mut s = seeded();
+        let marking = NormRect::new(0.25, 0.3, 0.6, 0.7);
+        let place = |s: &App| {
+            let f = crate::canvas::frame(s);
+            let x = (s.to_screen([marking.x0, marking.y0])[0] - f.at[0]) / f.size[0];
+            let y = (s.to_screen([marking.x0, marking.y0])[1] - f.at[1]) / f.size[1];
+            (x, y, f)
+        };
+        let (x0, y0, _) = place(&s);
+        for dy in [-100.0, -100.0, 40.0, -60.0, 120.0] {
+            let anchor = [s.viewport[0] * 0.37, s.viewport[1] * 0.61];
+            s.wheel(gestures::Wheel { dx: 0.0, dy, anchor, fine: false, alt: false });
+            let (x, y, f) = place(&s);
+            assert!((x - x0).abs() < 1e-4 && (y - y0).abs() < 1e-4,
+                "after dy {dy} the marking sits at {x:.4},{y:.4} instead of {x0:.4},{y0:.4} ({f:?})");
+        }
+        assert!(s.camera.zoom > 1.0, "the zoom really did change");
+    }
+
     #[test]
     fn region_and_zoom_round_trip_through_the_camera() {
         let s = seeded();
@@ -786,6 +927,119 @@ mod tests {
         let back = s.to_artifact(s.to_screen(p));
         assert!((back[0] - p[0]).abs() < 1e-3 && (back[1] - p[1]).abs() < 1e-3);
         let _ = NormRect::new(0.0, 0.0, 1.0, 1.0);
+    }
+
+    #[test]
+    fn the_wheel_zooms_about_the_pointer_and_ctrl_fines_it() {
+        let mut s = seeded();
+        let anchor = [300.0, 220.0];
+        let before = s.to_artifact(anchor);
+        s.wheel(gestures::Wheel { dx: 0.0, dy: -100.0, anchor, fine: false, alt: false });
+        assert!(s.camera.zoom > 1.0, "a wheel up zooms in");
+        let after = s.to_artifact(anchor);
+        assert!((after[0] - before[0]).abs() < 1e-3 && (after[1] - before[1]).abs() < 1e-3,
+            "the point under the pointer stays put: {before:?} then {after:?}");
+
+        s.fit();
+        s.wheel(gestures::Wheel { dx: 0.0, dy: 100.0, anchor, fine: false, alt: false });
+        assert!(s.camera.zoom < 1.0, "a wheel down zooms out");
+
+        s.fit();
+        s.wheel(gestures::Wheel { dx: 0.0, dy: -100.0, anchor, fine: true, alt: false });
+        let fine = s.camera.zoom;
+        s.fit();
+        s.wheel(gestures::Wheel { dx: 0.0, dy: -100.0, anchor, fine: false, alt: false });
+        assert!(fine > 1.0 && fine < s.camera.zoom, "Ctrl zooms the same way, further in is further out: {fine} vs {}", s.camera.zoom);
+    }
+
+    #[test]
+    fn alt_and_a_sideways_wheel_move_the_picture_without_zooming() {
+        let mut s = seeded();
+        let pan = s.camera.pan;
+        s.wheel(gestures::Wheel { dx: 0.0, dy: -40.0, anchor: [100.0, 100.0], fine: false, alt: true });
+        assert_eq!(s.camera.zoom, 1.0, "Alt never zooms");
+        assert!(s.camera.pan[1] < pan[1], "Alt moves the picture with the wheel");
+        s.fit();
+        s.wheel(gestures::Wheel { dx: -30.0, dy: 0.0, anchor: [100.0, 100.0], fine: false, alt: false });
+        assert_eq!(s.camera.zoom, 1.0, "a sideways wheel does not zoom");
+        assert!(s.camera.pan[0] < 0.0, "it moves the picture sideways");
+    }
+
+    #[test]
+    fn the_middle_button_pans_without_picking_a_marking() {
+        let mut s = seeded();
+        let id = s.project.artifacts[0].id;
+        s.mode = Mode::Draw { shape: Shape::Rect, start: [0.2, 0.2], current: [0.6, 0.6], points: vec![] };
+        s.commit_draft();
+        let marking = s.selected.unwrap();
+        s.deselect();
+        assert_eq!(s.active, Some(id));
+
+        // The marking is on screen somewhere; press right on it with the middle button.
+        let on_it = s.to_screen([0.4, 0.4]);
+        s.canvas_press(on_it, true);
+        assert!(matches!(s.mode, Mode::Pan { .. }), "the middle button starts a pan");
+        s.canvas_drag([on_it[0] + 40.0, on_it[1] + 25.0]);
+        s.canvas_release([on_it[0] + 40.0, on_it[1] + 25.0]);
+        assert!(s.selected.is_none(), "a middle drag never picks the marking");
+        assert!(s.camera.pan[0] > 0.0 && s.camera.pan[1] > 0.0, "the picture moved: {:?}", s.camera.pan);
+        assert!(s.project.artifacts[0].annotation(marking).is_some(), "the marking is still there");
+
+        // A plain click afterwards still selects it.
+        let on_it = s.to_screen([0.4, 0.4]);
+        s.canvas_press(on_it, false);
+        s.canvas_release(on_it);
+        assert_eq!(s.selected, Some(marking), "a click inside it picks it up");
+    }
+
+    #[test]
+    fn a_select_drag_pans_past_the_slop_but_a_click_picks() {
+        let mut s = seeded();
+        s.tool = Tool::Select;
+        s.mode = Mode::Draw { shape: Shape::Rect, start: [0.2, 0.2], current: [0.6, 0.6], points: vec![] };
+        s.commit_draft();
+        let marking = s.selected.unwrap();
+        s.deselect();
+        let press = s.to_screen([0.4, 0.4]);
+
+        // A shaky press inside the marking is still a click.
+        s.canvas_press(press, false);
+        assert!(matches!(s.mode, Mode::Select { .. }), "the select tool waits for the release");
+        assert!(!s.canvas_drag([press[0] + 1.5, press[1] - 1.5]), "inside the slop nothing moves");
+        s.canvas_release([press[0] + 1.5, press[1] - 1.5]);
+        assert_eq!(s.selected, Some(marking), "a click within the slop picks it");
+
+        // Dragging from the same spot past the slop moves the picture and picks nothing.
+        s.deselect();
+        let pan = s.camera.pan;
+        s.canvas_press(press, false);
+        assert!(s.canvas_drag([press[0] + 30.0, press[1] + 20.0]), "past the slop the press pans");
+        s.canvas_drag([press[0] + 50.0, press[1] + 40.0]);
+        let moved = [s.camera.pan[0] - pan[0], s.camera.pan[1] - pan[1]];
+        assert!((moved[0] - 50.0).abs() < 1e-3 && (moved[1] - 40.0).abs() < 1e-3,
+            "the picture follows the pointer from where it went down: {moved:?}");
+        s.canvas_release([press[0] + 50.0, press[1] + 40.0]);
+        assert!(s.selected.is_none(), "panning with select never picks");
+    }
+
+    #[test]
+    fn clicking_past_a_pan_still_selects() {
+        let mut s = seeded();
+        s.tool = Tool::Select;
+        s.mode = Mode::Draw { shape: Shape::Rect, start: [0.2, 0.2], current: [0.6, 0.6], points: vec![] };
+        s.commit_draft();
+        let marking = s.selected.unwrap();
+        s.deselect();
+        // Pan the picture far, then click the marking where it is now.
+        let start = s.to_screen([0.4, 0.4]);
+        s.canvas_press([start[0] - 200.0, start[1] - 120.0], true);
+        s.canvas_drag([start[0] - 40.0, start[1] - 20.0]);
+        s.canvas_release([start[0] - 40.0, start[1] - 20.0]);
+        assert!(s.selected.is_none());
+        let now = s.to_screen([0.4, 0.4]);
+        s.canvas_press(now, false);
+        s.canvas_release(now);
+        assert_eq!(s.selected, Some(marking), "the click after a pan lands where the marking is now");
     }
 
     #[test]

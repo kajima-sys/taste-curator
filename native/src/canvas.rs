@@ -1,7 +1,8 @@
 //! The canvas: the artifact's pixels, the vector overlays, and the pointer tools. Nothing here
 //! writes into the bitmap; markings are drawn on top, in screen points, every frame.
 
-use rune::{canvas, el, Color, Drag, El, LineCap, Phase, Shape, WheelEvent};
+use rune::{canvas, el, Color, Drag, El, LineCap, Phase, PointerButton, Shape, Spring, Tx, WheelEvent};
+use taste_curator::gestures;
 use taste_curator::model::{ArtifactSource, NormRect, Shape as Mark};
 
 use crate::app::{App, Mode};
@@ -18,16 +19,35 @@ pub fn color_for(polarity: taste_curator::model::Polarity) -> Color {
     }
 }
 
-/// The artifact's pixels, positioned by the camera.
+/// The camera as a rect: the picture's place and size in canvas points. Both the pixels and every
+/// marking are drawn from this one value, so nothing can drift apart while the zoom moves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Frame {
+    pub at: [f32; 2],
+    pub size: [f32; 2],
+}
+
+pub fn frame(s: &App) -> Frame {
+    let r = s.camera.rect(s.viewport, s.fitted());
+    Frame { at: [r[0], r[1]], size: [r[2].max(1.0), r[3].max(1.0)] }
+}
+
+/// The artifact's pixels, positioned by the camera. It lands where it is asked to on the same
+/// frame the markings do: a spring, or a pixel snap mid-move, would show the picture and its
+/// markings a frame apart during a wheel zoom.
 pub fn surface(s: &App) -> Option<El> {
     let id = s.active?;
     let page = s.pages.get(&(id, s.page))?;
-    let fitted = s.fitted();
-    let w = (fitted[0] * s.camera.zoom).max(1.0);
-    let h = (fitted[1] * s.camera.zoom).max(1.0);
-    let x = s.viewport[0] * 0.5 + s.camera.pan[0] - w * 0.5;
-    let y = s.viewport[1] * 0.5 + s.camera.pan[1] - h * 0.5;
-    Some(el().key("artifact-image").absolute(x, y).size(w, h).pixels(&page.pixels))
+    let f = frame(s);
+    Some(
+        el()
+            .key("artifact-image")
+            .absolute(f.at[0], f.at[1])
+            .size(f.size[0], f.size[1])
+            .motion(Spring::NONE)
+            .pixel_snap(false)
+            .pixels(&page.pixels),
+    )
 }
 
 /// Every marking of the artifact's current page, plus the draft in progress, in screen points.
@@ -92,6 +112,7 @@ fn screen_rect(s: &App, r: &NormRect) -> [[f32; 2]; 4] {
     [s.to_screen([r.x0, r.y0]), s.to_screen([r.x1, r.y0]), s.to_screen([r.x1, r.y1]), s.to_screen([r.x0, r.y1])]
 }
 
+
 /// How a marking's ink looks in the shelf and inspector.
 pub fn swatch(polarity: taste_curator::model::Polarity) -> Color {
     color_for(polarity)
@@ -112,21 +133,30 @@ pub fn canvas_view(s: &App) -> El {
             }
         })
         .on_wheel(|s: &mut App, e: WheelEvent, _| {
-            if e.mods.cmd || e.mods.ctrl {
-                let factor = (1.0 - e.dy * 0.0025).clamp(0.5, 2.0);
-                s.zoom_about([e.x, e.y], factor);
-            } else {
-                s.camera.pan_by([e.dx, e.dy]);
+            let command = gestures::wheel_command(gestures::Wheel {
+                dx: e.dx,
+                dy: e.dy,
+                anchor: [e.x, e.y],
+                fine: e.mods.ctrl || e.mods.cmd,
+                alt: e.mods.alt,
+            });
+            match command {
+                gestures::WheelCommand::Zoom { anchor, factor } => s.zoom_about(anchor, factor),
+                gestures::WheelCommand::Pan { by } => {
+                    s.camera.pan_by(by);
+                    s.status = "Moved".into();
+                }
             }
             true
         })
         .on_magnify(|s: &mut App, e: rune::MagnifyEvent, _| {
             if e.delta.abs() > 1e-4 {
-                s.zoom_about([e.x, e.y], 1.0 + e.delta);
+                s.zoom_about([e.x, e.y], gestures::pinch_factor(e.delta, false));
             }
             true
         })
-        .on_drag(|s: &mut App, d: &mut Drag, _| pointer(s, d));
+        .pointer_buttons([PointerButton::Middle])
+        .on_drag(|s: &mut App, d: &mut Drag, tx: &mut Tx| pointer(s, d, tx.button()));
     if is_text {
         stack = stack.child(text_lines(s));
     } else if let Some(img) = surface(s) {
@@ -138,79 +168,38 @@ pub fn canvas_view(s: &App) -> El {
             .absolute(0.0, 0.0)
             .w_full()
             .h_full()
+            .motion(Spring::NONE)
             .cursor(match s.tool {
                 taste_curator::tools::Tool::Select => rune::Cursor::Default,
                 taste_curator::tools::Tool::Pan => rune::Cursor::Grab,
                 _ => rune::Cursor::Crosshair,
             })
-            .on_drag(|s: &mut App, d: &mut Drag, _| pointer(s, d)),
+            .pointer_buttons([PointerButton::Middle])
+            .on_drag(|s: &mut App, d: &mut Drag, tx: &mut Tx| pointer(s, d, tx.button())),
     )
 }
 
-/// The pointer state machine: press decides, move updates, up commits.
-fn pointer(s: &mut App, d: &mut Drag) {
+/// The pointer, translated: press, move and release hand the canvas point and the button to
+/// `App`, which decides whether the picture moves or a marking is picked.
+fn pointer(s: &mut App, d: &mut Drag, button: PointerButton) {
     let local = [d.x, d.y];
-    let at = s.to_artifact(local);
     match d.phase {
-        Phase::Down => {
-            let panning = s.tool == taste_curator::tools::Tool::Pan;
-            let hit = if s.tool == taste_curator::tools::Tool::Select { hit_test(s, at) } else { None };
-            if panning {
-                s.mode = Mode::Pan { last: local };
-                s.status = "Moving the picture".into();
-            } else if let Some(id) = hit {
-                s.select(id);
-            } else if let Some(shape) = s.tool.shape() {
-                s.deselect();
-                s.mode = Mode::Draw { shape, start: at, current: at, points: vec![at] };
-                s.status = match shape {
-                    Mark::Rect => "Drawing a box".into(),
-                    Mark::Ellipse => "Drawing an oval".into(),
-                    _ => "Drawing around it".into(),
-                };
-            } else {
-                s.deselect();
-            }
+        Phase::Down => s.canvas_press(local, button == PointerButton::Middle),
+        Phase::Move => {
+            s.canvas_drag(local);
         }
-        Phase::Move => match &mut s.mode {
-            Mode::Pan { last } => {
-                let delta = [local[0] - last[0], local[1] - last[1]];
-                s.camera.pan_by(delta);
-                *last = local;
-            }
-            Mode::Draw { current, points, shape, .. } => {
-                *current = at;
-                if *shape == Mark::Freehand
-                    && points.last().is_none_or(|p| (p[0] - at[0]).abs() + (p[1] - at[1]).abs() > 0.001)
-                {
-                    points.push(at);
-                }
-            }
-            Mode::Idle => {}
-        },
         Phase::Up => {
             if d.cancelled() {
                 s.mode = Mode::Idle;
                 return;
             }
-            if matches!(s.mode, Mode::Draw { .. }) {
-                if let Mode::Draw { current, points, shape, .. } = &mut s.mode {
-                    *current = at;
-                    if *shape == Mark::Freehand && points.last() != Some(&at) {
-                        points.push(at);
-                    }
-                }
-                s.commit_draft();
-                return;
-            }
-            s.mode = Mode::Idle;
-            s.status = s.tool.hint().to_string();
+            s.canvas_release(local);
         }
     }
 }
 
 /// The topmost marking under a normalized point, largest area first so nesting works.
-fn hit_test(s: &App, at: [f32; 2]) -> Option<u32> {
+pub fn hit_test(s: &App, at: [f32; 2]) -> Option<u32> {
     let id = s.active?;
     let artifact = s.project.artifact(id)?;
     let pdf = matches!(artifact.source, ArtifactSource::Pdf { .. });

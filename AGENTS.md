@@ -126,3 +126,18 @@ inconsistent vocabulary that only worked for web UI.
 `seed/`, and in the app data dir between launches), and the same structs build the manifest and
 the PDF. There is no second implementation to keep in sync — change the model and every caller
 follows.
+
+## Canvas input (`src/gestures.rs`, `native/src/canvas.rs`)
+
+- Wheel meaning is decided by pure `gestures::wheel_command`: plain wheel zooms about the pointer
+  (up = in), `Ctrl`/`⌘` fines the step, `Alt` pans, a sideways wheel pans sideways. Keep new
+  modifier rules there with a unit test, not inline in the Rune handler.
+- Selection is press-to-arm, release-to-pick (`Mode::Select` with `CLICK_SLOP`): a press that
+  travels past the slop becomes a pan and takes up its own travel, so it never jumps. Middle-drag
+  pans from any tool. Don't move the pick back to `Phase::Down`.
+- The picture and every marking are placed from one `Camera::rect` (`canvas::frame`), with
+  `motion(Spring::NONE)` and `pixel_snap(false)` on them. Splitting those into two positioning
+  paths is what made markings drift during a wheel zoom. Keep the invariant test
+  `markings_stay_locked_to_the_picture_through_a_zoom`.
+- Headless scripted runs are slow in software rendering; pass `--fps 4` when using `--script`
+  with `--snap`/`--tree`/`--out`, or they hit the shell timeout.

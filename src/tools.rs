@@ -34,7 +34,7 @@ impl Tool {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Tool::Select => "Click a marking to edit it",
+            Tool::Select => "Click a marking to edit it, drag to move the picture",
             Tool::Pan => "Drag to move, scroll to zoom",
             Tool::Rect => "Drag a box around what catches your eye",
             Tool::Ellipse => "Drag an oval around one detail",

@@ -28,7 +28,10 @@ contrastive pair, and eight markings to explore.
   - `1` Still has it, `2` Lost it, `3` Don't care
   - click any axis pill to re-test or flip direction, or pair the active reference against a foil
 - **Mark up mode**: `V` select, `H` pan, `R` box, `O` oval, `F` freehand
-  - scroll to pan, Ctrl + scroll to zoom, `Ctrl+0` to fit
+  - scroll zooms about the pointer (up = in), `Ctrl` fine-zooms, `Alt` moves the picture
+  - middle-drag pans anywhere; with select, a press picks a marking on release and a drag past
+    a few points moves the picture instead, so panning never selects by accident
+  - `Ctrl+0` to fit
 - `Ctrl+Z` undo, `Ctrl+O` import, `Ctrl+E` export the PDF, `Delete` removes a selected marking
 
 Your work is saved as you go, in
