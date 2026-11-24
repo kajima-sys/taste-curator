@@ -1,6 +1,6 @@
 [package]
 name = "taste-curator"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "Local-first taste elicitation and machine-actionable PDF export, built with Rune."
